@@ -151,14 +151,17 @@ Show your pipeline is governed — and let other devs discover the gate. Also em
 
 Copy-paste workflows in [`examples/`](./examples/):
 
-| Recipe                                                              | What it gates                                                  |
-| ------------------------------------------------------------------- | -------------------------------------------------------------- |
-| [`gate-ai-agent-pr.yml`](./examples/gate-ai-agent-pr.yml)           | AI-generated PRs (Claude Code, Copilot, Cursor…) before merge. |
-| [`gate-deploy.yml`](./examples/gate-deploy.yml)                     | A production deploy on a `block` verdict (enforce).            |
-| [`gate-terraform.yml`](./examples/gate-terraform.yml)               | `terraform apply` on the plan's blast radius.                  |
-| [`gate-release.yml`](./examples/gate-release.yml)                   | A verdict before a tagged release ships.                       |
-| [`auto-merge-dependabot.yml`](./examples/auto-merge-dependabot.yml) | Auto-merge a dependency PR only when the verdict is `allow`.   |
-| [`gate-pr-comment.yml`](./examples/gate-pr-comment.yml)             | Shadow-mode evaluator that comments without failing the build. |
+| Recipe                                                              | What it gates                                                             |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [`gate-ai-agent-pr.yml`](./examples/gate-ai-agent-pr.yml)           | AI-generated PRs (Claude Code, Copilot, Cursor…) before merge.            |
+| [`gate-deploy.yml`](./examples/gate-deploy.yml)                     | A production deploy on a `block` verdict (enforce).                       |
+| [`gate-terraform.yml`](./examples/gate-terraform.yml)               | `terraform apply` on the plan's blast radius.                             |
+| [`gate-release.yml`](./examples/gate-release.yml)                   | A verdict before a tagged release ships.                                  |
+| [`auto-merge-dependabot.yml`](./examples/auto-merge-dependabot.yml) | Auto-merge a dependency PR only when the verdict is `allow`.              |
+| [`gate-pr-comment.yml`](./examples/gate-pr-comment.yml)             | Shadow-mode evaluator that comments without failing the build.            |
+| [`gate-deploy-broker.yml`](./examples/gate-deploy-broker.yml)       | Tier 3 — redeem the grant for a brokered credential (no standing secret). |
+| [`gate-deploy-gcp-wif.yml`](./examples/gate-deploy-gcp-wif.yml)     | Tier 3b — GCP Workload Identity Federation (cloud enforces the verdict).  |
+| [`gate-deploy-azure.yml`](./examples/gate-deploy-azure.yml)         | Tier 3b — Azure federated credentials.                                    |
 
 ## Inputs
 
