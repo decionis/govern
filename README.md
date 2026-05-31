@@ -79,7 +79,11 @@ A wrapper still lives in the workflow. To make execution **cryptographically** g
     run: ./deploy.sh # reads $DECIONIS_EXECUTION_GRANT, presents it to the target
 ```
 
-Full design (and the Tier-3 credential-broker end state where the target has _no_ credentials without a verdict): [`docs/architecture/execution-authority-governor-layer.md`](https://github.com/decionis/govern). Verify endpoints: `POST /v1/protocol/execution-grants/verify` and the JWKS at `/.well-known/decionis-execution-grant-jwks.json`.
+Full design: [`docs/architecture/execution-authority-governor-layer.md`](https://github.com/decionis/govern). Verify endpoints: `POST /v1/protocol/execution-grants/verify` and the JWKS at `/.well-known/decionis-execution-grant-jwks.json`.
+
+### Tier 3 — brokered credentials (no standing secrets)
+
+The strongest form: the deploy box holds **no** credentials. Register a target's secret with Decionis once, then exchange the grant for it at run time — skip the gate and `redeem` returns nothing, so the deploy fails closed. See [`examples/gate-deploy-broker.yml`](./examples/gate-deploy-broker.yml) and `POST /v1/protocol/execution-grants/redeem`.
 
 ---
 
