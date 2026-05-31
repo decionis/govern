@@ -1,9 +1,13 @@
 {
   "name": "@decionis/github-action",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Govern a GitHub Actions step on a Decionis Decision Dossier — gate deploys, releases, infra changes, and agent-triggered actions on a signed verdict.",
   "private": true,
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/decionis/govern.git"
+  },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "lint": "eslint src test",
@@ -16,8 +20,9 @@
   "files": [
     "action.yml",
     "src",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
-  "license": "UNLICENSED",
+  "license": "MIT",
   "homepage": "https://decionis.com/marketplace/github"
 }
