@@ -41,6 +41,21 @@ inputs:
     description: "Shell used to run the `run` command. `bash` (default) or `sh`."
     required: false
     default: "bash"
+  request-grant:
+    description: >-
+      When `true` and the verdict authorizes the action, request a short-lived,
+      single-use signed Execution Grant. It is exposed as the `execution-grant`
+      output and injected into the `run` command's environment as
+      `DECIONIS_EXECUTION_GRANT` so the deploy target can verify it before
+      acting (the Governor Layer — execution can't proceed without a verdict).
+    required: false
+    default: "false"
+  grant-audience:
+    description: >-
+      Optional audience to bind the Execution Grant to (e.g. a target/env id
+      like `prod-us-east`). The target verifies the grant was minted for it.
+    required: false
+    default: ""
   payload:
     description: >-
       JSON string describing the action being gated. Free-form fields per the
@@ -109,6 +124,13 @@ outputs:
     description: >-
       `true` if a `run` command was authorized and executed, `false` if it was
       blocked. Empty when no `run` command was supplied.
+  execution-grant:
+    description: >-
+      The short-lived, single-use signed Execution Grant (EdDSA JWT), when
+      `request-grant: true` and the verdict authorizes. A target verifies it
+      against the public JWKS before acting. Empty otherwise.
+  grant-expires-at:
+    description: "ISO timestamp when the Execution Grant expires."
 
 runs:
   using: "node20"

@@ -123,17 +123,65 @@ export function shouldExecute(decision, runMode) {
 }
 
 /** Run the gated command through the chosen shell, streaming its output. */
-function executeCommand(command, shell) {
+function executeCommand(command, shell, extraEnv = {}) {
   const sh = (shell || "bash").trim() === "sh" ? "sh" : "bash";
   const args = ["-e", "-c", command];
   return new Promise((resolve) => {
-    const child = spawn(sh, args, { stdio: "inherit", env: process.env });
+    const child = spawn(sh, args, { stdio: "inherit", env: { ...process.env, ...extraEnv } });
     child.on("close", (code) => resolve(code ?? 0));
     child.on("error", (err) => {
       logError(`Decionis could not run the gated command: ${err.message}`);
       resolve(1);
     });
   });
+}
+
+/**
+ * Build the execution-grant issue request body. Pure + testable. The grant
+ * binds the authorization to this org, dossier, action, and the repo@sha that
+ * triggered the run, so a target can verify exactly what was authorized.
+ */
+export function buildGrantRequestBody({ orgId, dossierId, decision, action, audience }) {
+  const repo = process.env.GITHUB_REPOSITORY ?? null;
+  const sha = process.env.GITHUB_SHA ?? null;
+  const subject = repo && sha ? `${repo}@${sha}` : (repo ?? undefined);
+  return {
+    org_id: orgId,
+    dossier_id: dossierId,
+    outcome: decision,
+    ...(action ? { action } : {}),
+    ...(audience ? { audience } : {}),
+    ...(subject ? { subject } : {}),
+  };
+}
+
+/** Request a signed execution grant from Decionis (returns null on any failure). */
+async function fetchExecutionGrant({ apiBaseUrl, apiKey, body, timeoutMs }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${apiBaseUrl}/v1/protocol/execution-grants/issue`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+        accept: "application/json",
+        "x-decionis-source": "github_actions",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      logNotice(`Execution grant not issued (HTTP ${res.status}).`);
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    logNotice(`Execution grant request failed: ${err instanceof Error ? err.message : err}`);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Decide whether a given verdict should fail the step under the configured mode. */
@@ -369,6 +417,8 @@ async function main() {
   const showAttribution = getBooleanInput("show-attribution", true);
   const runCommand = getInput("run");
   const shell = getInput("shell") || "bash";
+  const requestGrant = getBooleanInput("request-grant", false);
+  const grantAudience = getInput("grant-audience").trim();
   const apiBaseUrl = (getInput("api-base-url") || "https://api.decionis.com").replace(/\/$/, "");
   const siteBaseUrl = (getInput("site-base-url") || "https://decionis.com").replace(/\/$/, "");
   const timeoutMs = Number(getInput("request-timeout-ms") || "20000") || 20000;
@@ -488,10 +538,38 @@ async function main() {
     showAttribution,
   });
 
+  // ── Execution Grant (Governor Layer) ────────────────────────────────────
+  // On an authorizing verdict, request a short-lived signed grant. Targets
+  // verify it before acting, so execution can't proceed without a Decionis
+  // verdict even if the workflow gate is bypassed.
+  const grantEnv = {};
+  if (requestGrant && decision === "allow" && dossierId) {
+    const grant = await fetchExecutionGrant({
+      apiBaseUrl,
+      apiKey,
+      timeoutMs,
+      body: buildGrantRequestBody({
+        orgId,
+        dossierId,
+        decision,
+        action: actionLabel,
+        audience: grantAudience,
+      }),
+    });
+    if (grant?.execution_grant) {
+      await setOutput("execution-grant", grant.execution_grant);
+      await setOutput("grant-expires-at", grant.expires_at ?? "");
+      grantEnv.DECIONIS_EXECUTION_GRANT = grant.execution_grant;
+      grantEnv.DECIONIS_GRANT_VERIFY_URL = `${apiBaseUrl}/v1${grant.jwks_url ?? "/.well-known/decionis-execution-grant-jwks.json"}`;
+      logNotice(`Execution grant issued (expires ${grant.expires_at ?? "soon"}).`);
+    }
+  }
+
   // ── Enforcing path ──────────────────────────────────────────────────────
   // When a `run` command is supplied, Decionis OWNS the execution: the command
   // runs through this Action, so it cannot execute without an authorizing
-  // verdict. There is no skippable `if:` to delete.
+  // verdict. There is no skippable `if:` to delete. The grant (if any) is in
+  // the command's env as DECIONIS_EXECUTION_GRANT for the target to verify.
   if (runCommand) {
     const authorized = shouldExecute(decision, runMode);
     await setOutput("executed", authorized ? "true" : "false");
@@ -506,7 +584,7 @@ async function main() {
         ? "Decionis shadow mode — running the gated command (observe-only)."
         : "Decionis authorized execution — running the gated command.",
     );
-    const code = await executeCommand(runCommand, shell);
+    const code = await executeCommand(runCommand, shell, grantEnv);
     process.exit(code);
   }
 

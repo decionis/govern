@@ -65,6 +65,22 @@ A common pattern is to gate on the output:
 
 That `if:` is **advisory**. Anyone — or any AI agent editing the workflow — can delete one line and the deploy runs ungoverned. With `run:`, **Decionis owns the execution path**: the command only exists inside the gate, so bypassing it means rewriting the step — a visible, reviewable diff (protect `.github/workflows/**` with CODEOWNERS + branch protection to close that too). The verdict-only + `if:` form still works for cases where you can't wrap the command, but reach for `run:` whenever you actually need to _enforce_.
 
+### Execution Grants — move the trust boundary to the target
+
+A wrapper still lives in the workflow. To make execution **cryptographically** gated, set `request-grant: true`: on an authorizing verdict Decionis mints a short-lived, single-use, Ed25519-signed **Execution Grant**, injected into the command as `DECIONIS_EXECUTION_GRANT`. The deploy target verifies it (offline against the public JWKS, or online to burn the single-use nonce) **before doing anything** — so a rewritten workflow that skips the gate produces no valid grant and the target refuses.
+
+```yaml
+- uses: decionis/govern@v1
+  with:
+    workflow-key: github_deploy_approval
+    action: production-deploy
+    request-grant: true
+    grant-audience: prod-us-east
+    run: ./deploy.sh # reads $DECIONIS_EXECUTION_GRANT, presents it to the target
+```
+
+Full design (and the Tier-3 credential-broker end state where the target has _no_ credentials without a verdict): [`docs/architecture/execution-authority-governor-layer.md`](https://github.com/decionis/govern). Verify endpoints: `POST /v1/protocol/execution-grants/verify` and the JWKS at `/.well-known/decionis-execution-grant-jwks.json`.
+
 ---
 
 ## Three concepts
@@ -150,6 +166,8 @@ Copy-paste workflows in [`examples/`](./examples/):
 | `action`             | no       | —                             | Short label for what's being gated (e.g. `production-deploy`).     |
 | `run`                | no       | —                             | Command Decionis runs **only if authorized** (the enforcing path). |
 | `shell`              | no       | `bash`                        | Shell for `run` — `bash` or `sh`.                                  |
+| `request-grant`      | no       | `false`                       | Mint a signed Execution Grant on allow (Governor Layer).           |
+| `grant-audience`     | no       | —                             | Bind the grant to a target/env id (e.g. `prod-us-east`).           |
 | `payload`            | no       | _built from workflow context_ | JSON object describing the action being gated.                     |
 | `fail-on`            | no       | `block`                       | `block` / `escalate` / `block_or_escalate` / `never`.              |
 | `mode`               | no       | `enforce`                     | `enforce` or `shadow`. Shadow never fails the step.                |
@@ -161,15 +179,17 @@ Copy-paste workflows in [`examples/`](./examples/):
 
 ## Outputs
 
-| Output           | Description                                                                 |
-| ---------------- | --------------------------------------------------------------------------- |
-| `decision`       | `allow` / `block` / `escalate` / `restrain`                                 |
-| `dossier-id`     | Signed Decision Dossier id for this evaluation.                             |
-| `verify-url`     | Public verify URL (`?sig=` so unfurls render the verdict OG card).          |
-| `policy-version` | Policy version (string) that produced the verdict.                          |
-| `reason-code`    | Stable reason code (string), if returned.                                   |
-| `badge-markdown` | Ready-to-paste "Governed by Decionis" badge linking to the live verify URL. |
-| `executed`       | `true` if a `run` command was authorized and executed, `false` if blocked.  |
+| Output             | Description                                                                   |
+| ------------------ | ----------------------------------------------------------------------------- |
+| `decision`         | `allow` / `block` / `escalate` / `restrain`                                   |
+| `dossier-id`       | Signed Decision Dossier id for this evaluation.                               |
+| `verify-url`       | Public verify URL (`?sig=` so unfurls render the verdict OG card).            |
+| `policy-version`   | Policy version (string) that produced the verdict.                            |
+| `reason-code`      | Stable reason code (string), if returned.                                     |
+| `badge-markdown`   | Ready-to-paste "Governed by Decionis" badge linking to the live verify URL.   |
+| `executed`         | `true` if a `run` command was authorized and executed, `false` if blocked.    |
+| `execution-grant`  | Signed Execution Grant (EdDSA JWT) when `request-grant: true` and authorized. |
+| `grant-expires-at` | ISO timestamp when the Execution Grant expires.                               |
 
 ## Permissions
 

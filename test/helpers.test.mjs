@@ -1,8 +1,9 @@
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
   applyActionLabel,
+  buildGrantRequestBody,
   buildPrCommentBody,
   buildVerifyUrl,
   governedByBadgeMarkdown,
@@ -54,6 +55,42 @@ describe("shouldFail", () => {
     for (const failOn of ["block", "escalate", "block_or_escalate", "never"]) {
       assert.equal(shouldFail("allow", failOn, "enforce"), false);
     }
+  });
+});
+
+describe("buildGrantRequestBody", () => {
+  const prevRepo = process.env.GITHUB_REPOSITORY;
+  const prevSha = process.env.GITHUB_SHA;
+  afterEach(() => {
+    if (prevRepo === undefined) delete process.env.GITHUB_REPOSITORY;
+    else process.env.GITHUB_REPOSITORY = prevRepo;
+    if (prevSha === undefined) delete process.env.GITHUB_SHA;
+    else process.env.GITHUB_SHA = prevSha;
+  });
+  it("binds org, dossier, outcome, action, audience, and repo@sha subject", () => {
+    process.env.GITHUB_REPOSITORY = "octo/repo";
+    process.env.GITHUB_SHA = "deadbeef";
+    const body = buildGrantRequestBody({
+      orgId: "org-1",
+      dossierId: "dsr-1",
+      decision: "allow",
+      action: "production-deploy",
+      audience: "prod",
+    });
+    assert.deepEqual(body, {
+      org_id: "org-1",
+      dossier_id: "dsr-1",
+      outcome: "allow",
+      action: "production-deploy",
+      audience: "prod",
+      subject: "octo/repo@deadbeef",
+    });
+  });
+  it("omits optional fields when absent", () => {
+    delete process.env.GITHUB_REPOSITORY;
+    delete process.env.GITHUB_SHA;
+    const body = buildGrantRequestBody({ orgId: "o", dossierId: "d", decision: "allow" });
+    assert.deepEqual(body, { org_id: "o", dossier_id: "d", outcome: "allow" });
   });
 });
 
