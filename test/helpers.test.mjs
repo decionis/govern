@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  applyActionLabel,
   buildPrCommentBody,
   buildVerifyUrl,
   governedByBadgeMarkdown,
@@ -148,6 +149,37 @@ describe("buildPrCommentBody", () => {
     assert.match(buildPrCommentBody(base), /Governed by .*Decionis/);
     const bare = buildPrCommentBody({ ...base, showAttribution: false });
     assert.doesNotMatch(bare, /Governed by <a/);
+  });
+});
+
+describe("applyActionLabel", () => {
+  it("folds the action label into the payload", () => {
+    assert.deepEqual(applyActionLabel({ env: "prod" }, "production-deploy"), {
+      env: "prod",
+      action: "production-deploy",
+    });
+  });
+  it("does not clobber an explicit payload.action", () => {
+    assert.deepEqual(applyActionLabel({ action: "explicit" }, "production-deploy"), {
+      action: "explicit",
+    });
+  });
+  it("returns the payload untouched when no label is given", () => {
+    const p = { env: "prod" };
+    assert.equal(applyActionLabel(p, ""), p);
+    assert.equal(applyActionLabel(p, "   "), p);
+  });
+});
+
+describe("buildPrCommentBody — action label", () => {
+  it("surfaces the action label in the heading when provided", () => {
+    const body = buildPrCommentBody({
+      decision: "block",
+      runMode: "enforce",
+      failOn: "block",
+      actionLabel: "production-deploy",
+    });
+    assert.match(body, /Action gate · `production-deploy` — Blocked/);
   });
 });
 

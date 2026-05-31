@@ -97,6 +97,17 @@ export function resolvePayload(rawInput, contextBuilder = buildPayloadFromContex
   }
 }
 
+/**
+ * Fold the friendly `action` label into the payload without clobbering an
+ * explicit `action` field the caller already set. Returns a new object.
+ */
+export function applyActionLabel(payload, action) {
+  const label = (action ?? "").trim();
+  if (!label) return payload;
+  if (payload && typeof payload === "object" && "action" in payload) return payload;
+  return { ...payload, action: label };
+}
+
 /** Decide whether a given verdict should fail the step under the configured mode. */
 export function shouldFail(decision, failOn, runMode) {
   if (runMode === "shadow") return false;
@@ -177,9 +188,13 @@ export function buildPrCommentBody({
   reasonCode,
   runMode,
   failOn,
+  actionLabel = "",
   showAttribution = true,
 }) {
   const t = verdictTheme(decision);
+  const heading = actionLabel
+    ? `### ${t.emoji} Action gate · \`${actionLabel}\` — ${t.label}`
+    : `### ${t.emoji} Governed step — ${t.label}`;
   const rows = [
     `| **Verdict** | \`${decision || "unknown"}\` |`,
     policyVersion ? `| **Policy** | \`${policyVersion}\` |` : "",
@@ -198,7 +213,7 @@ export function buildPrCommentBody({
     COMMENT_MARKER,
     `<img alt="Decionis verdict: ${t.label}" src="${verdictBadgeUrl(decision)}" />`,
     "",
-    `### ${t.emoji} Governed step — ${t.label}`,
+    heading,
     "",
     "| | |",
     "| --- | --- |",
@@ -281,6 +296,7 @@ async function maybeCommentPr({
   reasonCode,
   runMode,
   failOn,
+  actionLabel,
   showAttribution,
 }) {
   if (!enabled) return;
@@ -305,6 +321,7 @@ async function maybeCommentPr({
     reasonCode,
     runMode,
     failOn,
+    actionLabel,
     showAttribution,
   });
   await upsertPrComment(repoFullName, prNumber, githubToken, body);
@@ -314,7 +331,8 @@ async function main() {
   const apiKey = getInput("api-key", { required: true });
   const orgId = getInput("org-id", { required: true });
   const workflowKey = getInput("workflow-key", { required: true });
-  const payload = resolvePayload(getInput("payload"));
+  const actionLabel = getInput("action").trim();
+  const payload = applyActionLabel(resolvePayload(getInput("payload")), actionLabel);
   const failOnRaw = (getInput("fail-on") || "block").trim().toLowerCase();
   const failOn = FAIL_MODES.has(failOnRaw) ? failOnRaw : "block";
   const runModeRaw = (getInput("mode") || "enforce").trim().toLowerCase();
@@ -396,7 +414,7 @@ async function main() {
   const theme = verdictTheme(decision);
   await writeSummary(
     [
-      `## ${theme.emoji} Decionis — Governed step: ${theme.label}`,
+      `## ${theme.emoji} Decionis Action Gate${actionLabel ? ` · \`${actionLabel}\`` : ""}: ${theme.label}`,
       "",
       `<img alt="Decionis verdict: ${theme.label}" src="${verdictBadgeUrl(decision)}" />`,
       "",
@@ -436,6 +454,7 @@ async function main() {
     reasonCode,
     runMode,
     failOn,
+    actionLabel,
     showAttribution,
   });
 

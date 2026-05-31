@@ -1,10 +1,10 @@
-name: "Decionis — Govern this step"
+name: "Decionis Action Gate"
 author: "Decionis"
-description: "Gate a GitHub workflow step on a signed Decionis Decision Dossier: shadow or enforce, with the verdict posted to the PR."
+description: "Govern high-risk deploys, AI-generated changes, and CI/CD actions before they execute — allow, block, or escalate."
 
 branding:
   icon: "shield"
-  color: "blue"
+  color: "purple"
 
 inputs:
   api-key:
@@ -20,6 +20,13 @@ inputs:
       The workflow key registered in Decionis policy (e.g.
       `github_deploy_approval`). Drives which policy bundle is evaluated.
     required: true
+  action:
+    description: >-
+      Short label for the action being gated (e.g. `production-deploy`,
+      `terraform-apply`, `ai-generated-pr`). Recorded on the dossier and shown
+      in the verdict. Optional — purely for readability and reporting.
+    required: false
+    default: ""
   payload:
     description: >-
       JSON string describing the action being gated. Free-form fields per the

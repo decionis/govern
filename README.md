@@ -1,14 +1,26 @@
-# 🛡️ Decionis — Govern this step
+# 🛡️ Decionis Action Gate
 
-**Gate any deploy, release, or infra change on a signed Decision Dossier — and leave verifiable proof on every run.**
+**Govern high-risk actions before they execute.**
 
-[![Marketplace](https://img.shields.io/github/v/release/decionis/govern?label=marketplace&logo=githubactions&logoColor=white&color=6D28D9)](https://github.com/marketplace/actions/decionis-govern-this-step)
+[![Marketplace](https://img.shields.io/github/v/release/decionis/govern?label=marketplace&logo=githubactions&logoColor=white&color=6D28D9)](https://github.com/marketplace/actions/decionis-action-gate)
 [![Governed by Decionis](https://img.shields.io/badge/Governed%20by-Decionis-6D28D9?logo=shield&logoColor=white)](https://github.com/decionis/govern)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-`decionis/govern` calls the Decionis policy engine before a step runs, returns a **signed, public-verifiable verdict** (`allow` / `block` / `escalate`), and — optionally — posts it to the PR. Start in **shadow mode** where it _never fails your build_, watch what it would have caught, then flip one line to `enforce`.
+> **Before software executes, Decionis decides whether it's allowed to.**
+
+GitHub Actions runs the code. **Decionis decides whether the run is authorized.** Add one step and every deploy, migration, infra change, or AI-generated PR is evaluated against your policy, approvals, and risk — then **allowed, blocked, or escalated** before it executes, with a signed Decision Dossier as audit-ready proof.
+
+Start in **shadow mode**, where it _never fails your build_ — observe what it would have caught, then flip one line to `enforce`.
 
 ---
+
+## The question every pipeline now faces
+
+AI coding agents — **Claude Code, Copilot, Cursor, Codex, OpenHands** — now open PRs, edit workflows, write migrations, and trigger deploys. The hard question is no longer _"who wrote this code?"_ It's:
+
+> **Should this action be allowed to execute?**
+
+That's the Action Gate.
 
 ## 30-second quickstart
 
@@ -20,13 +32,12 @@ Add this to any workflow. In `shadow` mode it records a verdict and **never fail
     api-key: ${{ secrets.DECIONIS_API_KEY }}
     org-id: ${{ secrets.DECIONIS_ORG_ID }}
     workflow-key: github_deploy_approval
-    mode: shadow # ← records every verdict; step never fails
-    comment-pr: "true" # ← posts the verdict + verify link on the PR
+    action: production-deploy # what's being gated
+    mode: shadow # records the verdict; never fails the build
+    comment-pr: "true" # posts the verdict + verify link on the PR
 ```
 
-Need keys? Create them free at **[decionis.com/quickstart?source=github_action](https://decionis.com/quickstart?source=github_action)** (no credit card, no call).
-
-When you're ready, gate the real thing — `enforce` fails the run on a `block`:
+The verdict comes back as `allow` / `block` / `escalate`. Gate the real thing with `mode: enforce`:
 
 ```yaml
 - uses: decionis/govern@v1
@@ -35,31 +46,69 @@ When you're ready, gate the real thing — `enforce` fails the run on a `block`:
     api-key: ${{ secrets.DECIONIS_API_KEY }}
     org-id: ${{ secrets.DECIONIS_ORG_ID }}
     workflow-key: github_deploy_approval
-    mode: enforce
+    action: production-deploy
+    mode: enforce # BLOCK fails the run before anything ships
 
 - name: Deploy
   if: steps.gate.outputs.decision == 'allow'
   run: ./deploy.sh
 ```
 
+Need keys? Create them free at **[decionis.com/quickstart?source=github_action](https://decionis.com/quickstart?source=github_action)** — no card, no call.
+
 ---
 
-## Why teams add it
+## Three concepts
 
-- **Proof, not vibes.** Every verdict produces a signed [Decision Dossier](https://decionis.com/dossier-example?source=github_action) with a public verify URL — paste it in a change ticket, an audit, or an incident review and it holds up.
-- **Zero-risk rollout.** `mode: shadow` measures what _would_ have been blocked without ever touching a green build. Flip to `enforce` when the evidence convinces you.
-- **Lives where your pipeline lives.** No bot to babysit, no portal to check — the verdict lands in the run summary and (optionally) the PR.
-- **The verify link unfurls.** Drop it in Slack / Teams / LinkedIn / X and it renders the verdict as an OG card.
+### 1. 🚦 Action Gate
+
+One verdict before execution — **`allow`**, **`block`**, or **`escalate`**. Composable into any later step via `steps.<id>.outputs.decision`.
+
+### 2. 🟣 Shadow Mode
+
+`mode: shadow` records what _would_ have been blocked without ever failing a build. Watch the would-have-blocked numbers, then enforce when the evidence convinces you.
+
+### 3. 🧾 Decision Dossiers
+
+Every verdict produces a signed, public-verifiable [Decision Dossier](https://decionis.com/dossier-example?source=github_action): **why** it happened, **who** approved it, **which policy** applied, and the **risk**. The verify link unfurls as an OG card in Slack / Teams / LinkedIn — paste it in an incident, a change ticket, or an audit and it holds up.
+
+---
+
+## Lead use case — govern AI-generated changes
+
+When an AI agent opens a PR or triggers a deploy, gate it **before** it merges or ships:
+
+```yaml
+- uses: decionis/govern@v1
+  id: gate
+  with:
+    api-key: ${{ secrets.DECIONIS_API_KEY }}
+    org-id: ${{ secrets.DECIONIS_ORG_ID }}
+    workflow-key: ai_change_gate
+    action: ai-generated-pr
+    comment-pr: "true"
+    payload: |
+      { "author": "${{ github.actor }}", "agent_generated": true }
+```
+
+See [`examples/gate-ai-agent-pr.yml`](./examples/gate-ai-agent-pr.yml) for the full recipe (auto-detects agent authorship and requires a human verdict on risky changes).
+
+## Also governs
+
+- **Deployments** — production releases, blue/green cutovers
+- **Infrastructure** — `terraform apply`, Pulumi, CDK
+- **Data** — database migrations, destructive jobs
+- **Privileged workflows** — release pipelines, secrets rotation, IAM changes
 
 ## What reviewers see on the PR
 
-With `comment-pr: 'true'`, the action posts a single, **self-updating** comment (re-runs edit it in place — no thread spam):
+A single, **self-updating** comment (re-runs edit it in place — no thread spam):
 
 ![Example Decionis PR comment — Blocked verdict with a signed verify link](./assets/pr-comment.svg)
 
 ## 📌 Add the badge
 
-Show that your pipeline is governed — and let other devs discover the check. The action also emits this as the `badge-markdown` output (pointing at the live verify URL):
+Show your pipeline is governed — and let other devs discover the gate. Also emitted as the `badge-markdown` output (pointing at the live verify URL):
 
 ```markdown
 [![Governed by Decionis](https://img.shields.io/badge/Governed%20by-Decionis-6D28D9?logo=shield&logoColor=white)](https://github.com/decionis/govern)
@@ -73,45 +122,31 @@ Show that your pipeline is governed — and let other devs discover the check. T
 
 Copy-paste workflows in [`examples/`](./examples/):
 
-| Recipe                                                              | What it gates                                                      |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| [`gate-deploy.yml`](./examples/gate-deploy.yml)                     | Block a production deploy on a `block` verdict (enforce).          |
-| [`gate-pr-comment.yml`](./examples/gate-pr-comment.yml)             | Shadow-mode evaluator that comments on PRs without failing builds. |
-| [`gate-terraform.yml`](./examples/gate-terraform.yml)               | Gate `terraform apply` on the plan's blast radius.                 |
-| [`gate-release.yml`](./examples/gate-release.yml)                   | Require a verdict before a tagged release ships.                   |
-| [`auto-merge-dependabot.yml`](./examples/auto-merge-dependabot.yml) | Only auto-merge a dependency PR when the verdict is `allow`.       |
-
-### Compose the verdict into later steps
-
-```yaml
-- uses: decionis/govern@v1
-  id: gate
-  with: { api-key: ${{ secrets.DECIONIS_API_KEY }}, org-id: ${{ secrets.DECIONIS_ORG_ID }}, workflow-key: release_gate }
-
-- name: Ship
-  if: steps.gate.outputs.decision == 'allow'
-  run: ./ship.sh
-
-- name: Page on-call to review
-  if: steps.gate.outputs.decision == 'escalate'
-  run: ./notify.sh "${{ steps.gate.outputs.verify-url }}"
-```
+| Recipe                                                              | What it gates                                                  |
+| ------------------------------------------------------------------- | -------------------------------------------------------------- |
+| [`gate-ai-agent-pr.yml`](./examples/gate-ai-agent-pr.yml)           | AI-generated PRs (Claude Code, Copilot, Cursor…) before merge. |
+| [`gate-deploy.yml`](./examples/gate-deploy.yml)                     | A production deploy on a `block` verdict (enforce).            |
+| [`gate-terraform.yml`](./examples/gate-terraform.yml)               | `terraform apply` on the plan's blast radius.                  |
+| [`gate-release.yml`](./examples/gate-release.yml)                   | A verdict before a tagged release ships.                       |
+| [`auto-merge-dependabot.yml`](./examples/auto-merge-dependabot.yml) | Auto-merge a dependency PR only when the verdict is `allow`.   |
+| [`gate-pr-comment.yml`](./examples/gate-pr-comment.yml)             | Shadow-mode evaluator that comments without failing the build. |
 
 ## Inputs
 
-| Input                | Required | Default                       | Description                                                                 |
-| -------------------- | -------- | ----------------------------- | --------------------------------------------------------------------------- |
-| `api-key`            | yes      | —                             | Decionis API key with `protocol:evaluate` scope. Pass as a secret.          |
-| `org-id`             | yes      | —                             | Decionis org id (UUID).                                                     |
-| `workflow-key`       | yes      | —                             | Workflow key registered in Decionis policy (e.g. `github_deploy_approval`). |
-| `payload`            | no       | _built from workflow context_ | JSON object describing the action being gated.                              |
-| `fail-on`            | no       | `block`                       | `block` / `escalate` / `block_or_escalate` / `never`.                       |
-| `mode`               | no       | `enforce`                     | `enforce` or `shadow`. Shadow never fails the step.                         |
-| `comment-pr`         | no       | `false`                       | Post (and update in place) the verdict as a PR comment.                     |
-| `show-attribution`   | no       | `true`                        | Include the "Governed by Decionis" footer on the PR comment.                |
-| `api-base-url`       | no       | `https://api.decionis.com`    | Override for staging / self-host.                                           |
-| `site-base-url`      | no       | `https://decionis.com`        | Override for staging / self-host.                                           |
-| `request-timeout-ms` | no       | `20000`                       | Timeout for the evaluate-decision call.                                     |
+| Input                | Required | Default                       | Description                                                        |
+| -------------------- | -------- | ----------------------------- | ------------------------------------------------------------------ |
+| `api-key`            | yes      | —                             | Decionis API key with `protocol:evaluate` scope. Pass as a secret. |
+| `org-id`             | yes      | —                             | Decionis org id (UUID).                                            |
+| `workflow-key`       | yes      | —                             | Workflow key registered in Decionis policy.                        |
+| `action`             | no       | —                             | Short label for what's being gated (e.g. `production-deploy`).     |
+| `payload`            | no       | _built from workflow context_ | JSON object describing the action being gated.                     |
+| `fail-on`            | no       | `block`                       | `block` / `escalate` / `block_or_escalate` / `never`.              |
+| `mode`               | no       | `enforce`                     | `enforce` or `shadow`. Shadow never fails the step.                |
+| `comment-pr`         | no       | `false`                       | Post (and update in place) the verdict as a PR comment.            |
+| `show-attribution`   | no       | `true`                        | Include the "Governed by Decionis" footer on the PR comment.       |
+| `api-base-url`       | no       | `https://api.decionis.com`    | Override for staging / self-host.                                  |
+| `site-base-url`      | no       | `https://decionis.com`        | Override for staging / self-host.                                  |
+| `request-timeout-ms` | no       | `20000`                       | Timeout for the evaluate-decision call.                            |
 
 ## Outputs
 
@@ -134,25 +169,9 @@ permissions:
   pull-requests: write
 ```
 
-## Shadow → enforce rollout
+## How it works
 
-The canonical path — install in shadow → watch the would-have-blocked numbers → flip to enforce — is walked end-to-end at **[decionis.com/shadow-mode?surface=github_action](https://decionis.com/shadow-mode?surface=github_action)**.
-
-```yaml
-- uses: decionis/govern@v1
-  with:
-    api-key: ${{ secrets.DECIONIS_API_KEY }}
-    org-id: ${{ secrets.DECIONIS_ORG_ID }}
-    workflow-key: github_deploy_approval
-    mode: shadow # observe first; flip to enforce when you're convinced
-```
-
-## Honesty notes
-
-- Inputs are echoed into the dossier, so you can audit exactly what produced a verdict.
-- `shadow` mode **never** fails the step, regardless of `fail-on`.
-- A non-200 from the API fails the step with the status + a truncated body — no silent green builds.
-- The PR comment is sticky (one comment, updated in place) — re-runs don't spam the thread.
+The action calls `POST /v1/protocol/evaluate-decision` with the action label + payload (or a payload built from the workflow context), and returns the signed verdict. Inputs are echoed into the dossier so you can audit exactly what produced it. `shadow` mode **never** fails the step; a non-200 from the API fails the step with the status — no silent green builds.
 
 ---
 
