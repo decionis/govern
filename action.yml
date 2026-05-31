@@ -1,0 +1,83 @@
+name: "Decionis — Govern this step"
+author: "Decionis"
+description: >-
+  Gate a GitHub workflow step on a Decionis Decision Dossier. Calls the
+  /v1/protocol/evaluate-decision API and fails the step if the verdict is a
+  block (or escalate, or both — configurable). Returns the dossier id and a
+  public verify URL so the proof is one click away from the PR.
+
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  api-key:
+    description: >-
+      Decionis API key with `protocol:evaluate` scope. Pass as a workflow secret
+      (`${{ secrets.DECIONIS_API_KEY }}`). Never hard-code.
+    required: true
+  org-id:
+    description: "Decionis org id (UUID) the decision belongs to."
+    required: true
+  workflow-key:
+    description: >-
+      The workflow key registered in Decionis policy (e.g.
+      `github_deploy_approval`). Drives which policy bundle is evaluated.
+    required: true
+  payload:
+    description: >-
+      JSON string describing the action being gated. Free-form fields per the
+      workflow's policy schema (resource, actor, requested change, etc.). When
+      omitted, a minimal payload is built from the workflow context
+      (repo / ref / sha / event / actor / run id).
+    required: false
+    default: ""
+  fail-on:
+    description: >-
+      Which verdicts cause this Action to fail the step. One of:
+      `block` (default), `escalate`, `block_or_escalate`, `never`.
+    required: false
+    default: "block"
+  mode:
+    description: >-
+      `enforce` (default) or `shadow`. In shadow mode the Action records a
+      verdict but never fails the step — useful for week-one rollouts.
+    required: false
+    default: "enforce"
+  comment-pr:
+    description: >-
+      When `true` and this run was triggered by a pull_request event, post the
+      verdict as a PR comment with the dossier verify URL. Requires
+      `pull-requests: write` permission on the workflow.
+    required: false
+    default: "false"
+  api-base-url:
+    description: "Override the Decionis API base URL (for staging / self-host)."
+    required: false
+    default: "https://api.decionis.com"
+  site-base-url:
+    description: "Override the public site base URL (for staging / self-host)."
+    required: false
+    default: "https://decionis.com"
+  request-timeout-ms:
+    description: "Timeout for the evaluate-decision call, in milliseconds."
+    required: false
+    default: "20000"
+
+outputs:
+  decision:
+    description: "Verdict — one of: allow, block, escalate, restrain."
+  dossier-id:
+    description: "Signed Decision Dossier id for this evaluation."
+  verify-url:
+    description: >-
+      Public verify URL with `?sig=` — opens the branded verification page;
+      unfurls with the OG card in Slack / Teams / LinkedIn / X.
+  policy-version:
+    description: "Policy version (string) that produced the verdict."
+  reason-code:
+    description: "Stable reason code (string) for the verdict, if returned."
+
+runs:
+  using: "node20"
+  main: "src/index.mjs"

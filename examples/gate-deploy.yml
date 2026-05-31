@@ -1,0 +1,38 @@
+# Block a production deploy on a Decionis Decision Dossier (enforce mode).
+# Drop into .github/workflows/ on the consumer's repo.
+
+name: Deploy (governed)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  govern-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decionis verdict
+        id: decionis
+        uses: decionis/govern@v1
+        with:
+          api-key: ${{ secrets.DECIONIS_API_KEY }}
+          org-id: ${{ secrets.DECIONIS_ORG_ID }}
+          workflow-key: github_deploy_approval
+          payload: |
+            {
+              "environment": "production",
+              "service": "api",
+              "blast_radius": "high"
+            }
+          fail-on: block
+
+      # Only deploy if Decionis allowed it. (The step above already failed the
+      # job on `block`; this is belt + suspenders for `escalate`.)
+      - name: Deploy
+        if: steps.decionis.outputs.decision == 'allow'
+        run: ./scripts/deploy.sh
