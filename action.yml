@@ -1,10 +1,6 @@
 name: "Decionis — Govern this step"
 author: "Decionis"
-description: >-
-  Gate a GitHub workflow step on a Decionis Decision Dossier. Calls the
-  /v1/protocol/evaluate-decision API and fails the step if the verdict is a
-  block (or escalate, or both — configurable). Returns the dossier id and a
-  public verify URL so the proof is one click away from the PR.
+description: "Gate a GitHub workflow step on a signed Decionis Decision Dossier: shadow or enforce, with the verdict posted to the PR."
 
 branding:
   icon: "shield"
