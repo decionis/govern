@@ -55,16 +55,7 @@ When you're ready, gate the real thing — `enforce` fails the run on a `block`:
 
 With `comment-pr: 'true'`, the action posts a single, **self-updating** comment (re-runs edit it in place — no thread spam):
 
-> 🛑 **Governed step — Blocked**
-> | | |
-> |---|---|
-> | **Verdict** | `block` |
-> | **Policy** | `github_deploy_approval@v4` |
-> | **Reason** | `change_window_closed` |
->
-> **[🔎 Verify this decision →](https://decionis.com/verify/decision-dossiers/…)** — signed, tamper-evident proof.
->
-> <sub>🛡️ Governed by Decionis · gate your own deploys with `decionis/govern`</sub>
+![Example Decionis PR comment — Blocked verdict with a signed verify link](./assets/pr-comment.svg)
 
 ## 📌 Add the badge
 
