@@ -27,6 +27,20 @@ inputs:
       in the verdict. Optional — purely for readability and reporting.
     required: false
     default: ""
+  run:
+    description: >-
+      Shell command(s) that Decionis executes ONLY if it authorizes the action.
+      This is the enforcing pattern: the gated command runs *through* Decionis,
+      so it cannot execute without a verdict — unlike an advisory `if:` guard
+      that can simply be deleted. On block/escalate in enforce mode the command
+      never runs and the step fails. In shadow mode the command always runs
+      (observe-only — Decionis records the verdict without changing behavior).
+    required: false
+    default: ""
+  shell:
+    description: "Shell used to run the `run` command. `bash` (default) or `sh`."
+    required: false
+    default: "bash"
   payload:
     description: >-
       JSON string describing the action being gated. Free-form fields per the
@@ -91,6 +105,10 @@ outputs:
     description: >-
       Ready-to-paste Markdown for a "Governed by Decionis" badge linking to the
       signed verify URL — drop it in a README or release notes.
+  executed:
+    description: >-
+      `true` if a `run` command was authorized and executed, `false` if it was
+      blocked. Empty when no `run` command was supplied.
 
 runs:
   using: "node20"

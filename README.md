@@ -24,37 +24,46 @@ That's the Action Gate.
 
 ## 30-second quickstart
 
-Add this to any workflow. In `shadow` mode it records a verdict and **never fails your build** — zero risk to try:
+**Wrap the command you want to govern.** Decionis runs it _through_ the gate, so it can't execute without an authorizing verdict:
 
 ```yaml
 - uses: decionis/govern@v1
-  with:
-    api-key: ${{ secrets.DECIONIS_API_KEY }}
-    org-id: ${{ secrets.DECIONIS_ORG_ID }}
-    workflow-key: github_deploy_approval
-    action: production-deploy # what's being gated
-    mode: shadow # records the verdict; never fails the build
-    comment-pr: "true" # posts the verdict + verify link on the PR
-```
-
-The verdict comes back as `allow` / `block` / `escalate`. Gate the real thing with `mode: enforce`:
-
-```yaml
-- uses: decionis/govern@v1
-  id: gate
   with:
     api-key: ${{ secrets.DECIONIS_API_KEY }}
     org-id: ${{ secrets.DECIONIS_ORG_ID }}
     workflow-key: github_deploy_approval
     action: production-deploy
-    mode: enforce # BLOCK fails the run before anything ships
+    run: ./deploy.sh # ← Decionis runs this ONLY if it authorizes the action
+```
 
-- name: Deploy
-  if: steps.gate.outputs.decision == 'allow'
-  run: ./deploy.sh
+On `allow` the command runs. On `block`/`escalate` it **never runs** and the step fails. Try it risk-free with `mode: shadow` — the command still runs, but Decionis only records the verdict (never fails the build):
+
+```yaml
+- uses: decionis/govern@v1
+  with:
+    api-key: ${{ secrets.DECIONIS_API_KEY }}
+    org-id: ${{ secrets.DECIONIS_ORG_ID }}
+    workflow-key: github_deploy_approval
+    action: production-deploy
+    run: ./deploy.sh
+    mode: shadow # observe-only; records the verdict, never blocks
+    comment-pr: "true" # posts the verdict + verify link on the PR
 ```
 
 Need keys? Create them free at **[decionis.com/quickstart?source=github_action](https://decionis.com/quickstart?source=github_action)** — no card, no call.
+
+### Why a wrapper, not an `if:`
+
+A common pattern is to gate on the output:
+
+```yaml
+- uses: decionis/govern@v1
+  id: gate
+- run: ./deploy.sh
+  if: steps.gate.outputs.decision == 'allow' # ⚠️ advisory — can be deleted
+```
+
+That `if:` is **advisory**. Anyone — or any AI agent editing the workflow — can delete one line and the deploy runs ungoverned. With `run:`, **Decionis owns the execution path**: the command only exists inside the gate, so bypassing it means rewriting the step — a visible, reviewable diff (protect `.github/workflows/**` with CODEOWNERS + branch protection to close that too). The verdict-only + `if:` form still works for cases where you can't wrap the command, but reach for `run:` whenever you actually need to _enforce_.
 
 ---
 
@@ -139,6 +148,8 @@ Copy-paste workflows in [`examples/`](./examples/):
 | `org-id`             | yes      | —                             | Decionis org id (UUID).                                            |
 | `workflow-key`       | yes      | —                             | Workflow key registered in Decionis policy.                        |
 | `action`             | no       | —                             | Short label for what's being gated (e.g. `production-deploy`).     |
+| `run`                | no       | —                             | Command Decionis runs **only if authorized** (the enforcing path). |
+| `shell`              | no       | `bash`                        | Shell for `run` — `bash` or `sh`.                                  |
 | `payload`            | no       | _built from workflow context_ | JSON object describing the action being gated.                     |
 | `fail-on`            | no       | `block`                       | `block` / `escalate` / `block_or_escalate` / `never`.              |
 | `mode`               | no       | `enforce`                     | `enforce` or `shadow`. Shadow never fails the step.                |
@@ -158,6 +169,7 @@ Copy-paste workflows in [`examples/`](./examples/):
 | `policy-version` | Policy version (string) that produced the verdict.                          |
 | `reason-code`    | Stable reason code (string), if returned.                                   |
 | `badge-markdown` | Ready-to-paste "Governed by Decionis" badge linking to the live verify URL. |
+| `executed`       | `true` if a `run` command was authorized and executed, `false` if blocked.  |
 
 ## Permissions
 

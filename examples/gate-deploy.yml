@@ -1,5 +1,8 @@
-# Block a production deploy on a Decionis Decision Dossier (enforce mode).
-# Drop into .github/workflows/ on the consumer's repo.
+# Enforce a production deploy with Decionis — the deploy runs THROUGH the gate.
+#
+# Because the deploy command is passed to `run:`, it cannot execute without an
+# authorizing verdict. There is no `if:` to delete: on block/escalate the
+# command never runs and the job fails. Drop into .github/workflows/.
 
 name: Deploy (governed)
 
@@ -16,23 +19,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Decionis verdict
-        id: decionis
+      - name: Govern + deploy
         uses: decionis/govern@v1
         with:
           api-key: ${{ secrets.DECIONIS_API_KEY }}
           org-id: ${{ secrets.DECIONIS_ORG_ID }}
           workflow-key: github_deploy_approval
+          action: production-deploy
+          mode: enforce
           payload: |
             {
               "environment": "production",
               "service": "api",
               "blast_radius": "high"
             }
-          fail-on: block
-
-      # Only deploy if Decionis allowed it. (The step above already failed the
-      # job on `block`; this is belt + suspenders for `escalate`.)
-      - name: Deploy
-        if: steps.decionis.outputs.decision == 'allow'
-        run: ./scripts/deploy.sh
+          # Decionis runs this ONLY if it authorizes the deploy. On block or
+          # escalate it never runs and the step fails — no skippable `if:`.
+          run: ./scripts/deploy.sh

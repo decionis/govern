@@ -7,6 +7,7 @@ import {
   buildVerifyUrl,
   governedByBadgeMarkdown,
   resolvePayload,
+  shouldExecute,
   shouldFail,
   verdictBadgeUrl,
   verdictTheme,
@@ -53,6 +54,24 @@ describe("shouldFail", () => {
     for (const failOn of ["block", "escalate", "block_or_escalate", "never"]) {
       assert.equal(shouldFail("allow", failOn, "enforce"), false);
     }
+  });
+});
+
+describe("shouldExecute (wrapped `run` command)", () => {
+  it("enforce: only an allow verdict permits execution", () => {
+    assert.equal(shouldExecute("allow", "enforce"), true);
+    for (const d of ["block", "deny", "escalate", "review", "restrain", ""]) {
+      assert.equal(shouldExecute(d, "enforce"), false, `enforce ${d}`);
+    }
+  });
+  it("shadow: always executes (observe-only, never changes behavior)", () => {
+    for (const d of ["allow", "block", "escalate", "review", "deny"]) {
+      assert.equal(shouldExecute(d, "shadow"), true, `shadow ${d}`);
+    }
+  });
+  it("is case-insensitive on the verdict", () => {
+    assert.equal(shouldExecute("ALLOW", "enforce"), true);
+    assert.equal(shouldExecute("BLOCK", "enforce"), false);
   });
 });
 

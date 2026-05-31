@@ -4,6 +4,7 @@
 // Resolves a Decionis Decision Dossier for the current workflow step and
 // fails the step on a `block` (or `escalate`, configurable) verdict.
 
+import { spawn } from "node:child_process";
 import { appendFile, readFile } from "node:fs/promises";
 
 const FAIL_MODES = new Set(["block", "escalate", "block_or_escalate", "never"]);
@@ -106,6 +107,33 @@ export function applyActionLabel(payload, action) {
   if (!label) return payload;
   if (payload && typeof payload === "object" && "action" in payload) return payload;
   return { ...payload, action: label };
+}
+
+/**
+ * Decide whether the wrapped `run` command may execute.
+ *
+ * This is the enforcing path — Decionis runs the command itself, so it cannot
+ * execute without an authorizing verdict (no skippable `if:`). In `shadow`
+ * mode the command always runs: shadow observes, it must never change behavior.
+ * In `enforce` mode only an `allow` verdict permits execution.
+ */
+export function shouldExecute(decision, runMode) {
+  if (runMode === "shadow") return true;
+  return (decision ?? "").toLowerCase() === "allow";
+}
+
+/** Run the gated command through the chosen shell, streaming its output. */
+function executeCommand(command, shell) {
+  const sh = (shell || "bash").trim() === "sh" ? "sh" : "bash";
+  const args = ["-e", "-c", command];
+  return new Promise((resolve) => {
+    const child = spawn(sh, args, { stdio: "inherit", env: process.env });
+    child.on("close", (code) => resolve(code ?? 0));
+    child.on("error", (err) => {
+      logError(`Decionis could not run the gated command: ${err.message}`);
+      resolve(1);
+    });
+  });
 }
 
 /** Decide whether a given verdict should fail the step under the configured mode. */
@@ -339,6 +367,8 @@ async function main() {
   const runMode = RUN_MODES.has(runModeRaw) ? runModeRaw : "enforce";
   const commentPr = getBooleanInput("comment-pr", false);
   const showAttribution = getBooleanInput("show-attribution", true);
+  const runCommand = getInput("run");
+  const shell = getInput("shell") || "bash";
   const apiBaseUrl = (getInput("api-base-url") || "https://api.decionis.com").replace(/\/$/, "");
   const siteBaseUrl = (getInput("site-base-url") || "https://decionis.com").replace(/\/$/, "");
   const timeoutMs = Number(getInput("request-timeout-ms") || "20000") || 20000;
@@ -458,6 +488,31 @@ async function main() {
     showAttribution,
   });
 
+  // ── Enforcing path ──────────────────────────────────────────────────────
+  // When a `run` command is supplied, Decionis OWNS the execution: the command
+  // runs through this Action, so it cannot execute without an authorizing
+  // verdict. There is no skippable `if:` to delete.
+  if (runCommand) {
+    const authorized = shouldExecute(decision, runMode);
+    await setOutput("executed", authorized ? "true" : "false");
+    if (!authorized) {
+      logError(
+        `Decionis BLOCKED execution (verdict=${decision}, mode=${runMode}). The gated command was NOT run. Dossier: ${dossierId}`,
+      );
+      process.exit(1);
+    }
+    logNotice(
+      runMode === "shadow"
+        ? "Decionis shadow mode — running the gated command (observe-only)."
+        : "Decionis authorized execution — running the gated command.",
+    );
+    const code = await executeCommand(runCommand, shell);
+    process.exit(code);
+  }
+
+  // ── Advisory path (no `run`) ────────────────────────────────────────────
+  // Verdict-only: sets outputs for a downstream `if:`. Note this guard is
+  // advisory and can be removed — prefer the `run` wrapper above to enforce.
   if (shouldFail(decision, failOn, runMode)) {
     logError(
       `Decionis blocked this step (verdict=${decision}, fail-on=${failOn}, mode=${runMode}). Dossier: ${dossierId}`,
