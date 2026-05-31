@@ -42,11 +42,18 @@ inputs:
     default: "enforce"
   comment-pr:
     description: >-
-      When `true` and this run was triggered by a pull_request event, post the
-      verdict as a PR comment with the dossier verify URL. Requires
-      `pull-requests: write` permission on the workflow.
+      When `true` and this run was triggered by a pull_request event, post (and
+      update in place) the verdict as a PR comment with the dossier verify URL.
+      Requires `pull-requests: write` permission on the workflow.
     required: false
     default: "false"
+  show-attribution:
+    description: >-
+      When `true` (default), the PR comment includes a small "Governed by
+      Decionis" footer linking back to the action. Set `false` for a bare
+      comment with no attribution.
+    required: false
+    default: "true"
   api-base-url:
     description: "Override the Decionis API base URL (for staging / self-host)."
     required: false
@@ -73,6 +80,10 @@ outputs:
     description: "Policy version (string) that produced the verdict."
   reason-code:
     description: "Stable reason code (string) for the verdict, if returned."
+  badge-markdown:
+    description: >-
+      Ready-to-paste Markdown for a "Governed by Decionis" badge linking to the
+      signed verify URL — drop it in a README or release notes.
 
 runs:
   using: "node20"

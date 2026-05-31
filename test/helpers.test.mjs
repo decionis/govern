@@ -1,7 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildVerifyUrl, resolvePayload, shouldFail } from "../src/index.mjs";
+import {
+  buildPrCommentBody,
+  buildVerifyUrl,
+  governedByBadgeMarkdown,
+  resolvePayload,
+  shouldFail,
+  verdictBadgeUrl,
+  verdictTheme,
+} from "../src/index.mjs";
 
 describe("shouldFail", () => {
   it("fails on block when fail-on=block (default)", () => {
@@ -72,6 +80,74 @@ describe("buildVerifyUrl", () => {
   it("strips a trailing slash from the site base URL", () => {
     const url = buildVerifyUrl("https://decionis.com/", "dsr-x", null);
     assert.match(url, /^https:\/\/decionis\.com\/verify\/decision-dossiers\/dsr-x/);
+  });
+});
+
+describe("verdictTheme", () => {
+  it("maps verdict synonyms to a stable label + color", () => {
+    assert.equal(verdictTheme("allow").label, "Allowed");
+    assert.equal(verdictTheme("deny").label, "Blocked");
+    assert.equal(verdictTheme("denied").label, "Blocked");
+    assert.equal(verdictTheme("review").label, "Escalate");
+    assert.equal(verdictTheme("restrained").label, "Restrained");
+  });
+  it("is case-insensitive and falls back for unknown verdicts", () => {
+    assert.equal(verdictTheme("BLOCK").label, "Blocked");
+    assert.equal(verdictTheme("weird").label, "weird");
+    assert.equal(verdictTheme("").label, "Unknown");
+  });
+});
+
+describe("verdictBadgeUrl", () => {
+  it("is a shields.io URL carrying the verdict label", () => {
+    assert.match(verdictBadgeUrl("block"), /^https:\/\/img\.shields\.io\/badge\/Decionis-Blocked-/);
+    assert.match(verdictBadgeUrl("allow"), /Decionis-Allowed-2ea043/);
+  });
+});
+
+describe("governedByBadgeMarkdown", () => {
+  it("produces a clickable shields badge linking to the action by default", () => {
+    const md = governedByBadgeMarkdown();
+    assert.match(md, /^\[!\[Governed by Decionis\]\(https:\/\/img\.shields\.io\/badge\/Governed/);
+    assert.match(md, /\(https:\/\/github\.com\/decionis\/govern\)$/);
+  });
+  it("links to a custom URL (e.g. the live verify URL) when given one", () => {
+    assert.match(
+      governedByBadgeMarkdown("https://decionis.com/verify/x"),
+      /\(https:\/\/decionis\.com\/verify\/x\)$/,
+    );
+  });
+});
+
+describe("buildPrCommentBody", () => {
+  const base = {
+    decision: "block",
+    dossierId: "dsr-123",
+    verifyUrl: "https://decionis.com/verify/decision-dossiers/dsr-123?sig=abc",
+    policyVersion: "v4.3.0",
+    reasonCode: "velocity_ceiling_exceeded",
+    runMode: "enforce",
+    failOn: "block",
+  };
+  it("includes the hidden sticky marker so re-runs update in place", () => {
+    assert.match(buildPrCommentBody(base), /<!-- decionis-govern -->/);
+  });
+  it("renders the verdict, verify link, policy, and reason", () => {
+    const body = buildPrCommentBody(base);
+    assert.match(body, /Governed step — Blocked/);
+    assert.match(body, /Verify this decision →/);
+    assert.match(body, /v4\.3\.0/);
+    assert.match(body, /velocity_ceiling_exceeded/);
+  });
+  it("shows the shadow-mode note (never fails build) in shadow", () => {
+    const body = buildPrCommentBody({ ...base, runMode: "shadow" });
+    assert.match(body, /Shadow mode/);
+    assert.match(body, /never fails your build/);
+  });
+  it("includes attribution by default and omits it when disabled", () => {
+    assert.match(buildPrCommentBody(base), /Governed by .*Decionis/);
+    const bare = buildPrCommentBody({ ...base, showAttribution: false });
+    assert.doesNotMatch(bare, /Governed by <a/);
   });
 });
 

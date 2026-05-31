@@ -122,28 +122,167 @@ export function buildVerifyUrl(siteBase, dossierId, signature) {
   return `${base}/verify/decision-dossiers/${id}?source=github_actions`;
 }
 
-async function postPrComment(repoFullName, prNumber, githubToken, body) {
-  if (!repoFullName || !prNumber || !githubToken) return false;
+// ───────────────────────── Growth / virality surface ─────────────────────────
+// The PR comment, the run summary, and the embeddable badge are the surfaces
+// every reviewer and downstream repo sees. They carry a signed verify link plus
+// soft attribution back to the action so adoption compounds (each governed repo
+// becomes a billboard). Attribution is on by default but a single input turns
+// it off for teams that want a bare comment.
+
+const ACTION_URL = "https://github.com/decionis/govern";
+const BRAND_URL = "https://decionis.com";
+const COMMENT_MARKER = "<!-- decionis-govern -->";
+
+/** Map a raw verdict to display theme + shields.io color (no leading #). */
+export function verdictTheme(decision) {
+  const d = (decision ?? "").toLowerCase();
+  if (d === "allow") return { emoji: "✅", label: "Allowed", color: "2ea043" };
+  if (d === "block" || d === "deny" || d === "denied")
+    return { emoji: "🛑", label: "Blocked", color: "d1242f" };
+  if (d === "escalate" || d === "review")
+    return { emoji: "⚠️", label: "Escalate", color: "bf8700" };
+  if (d === "restrain" || d === "restrained")
+    return { emoji: "✋", label: "Restrained", color: "9a6700" };
+  return { emoji: "🛡️", label: decision || "Unknown", color: "6D28D9" };
+}
+
+/** Verdict shield image URL — rendered at the top of the PR comment + summary. */
+export function verdictBadgeUrl(decision) {
+  const t = verdictTheme(decision);
+  return `https://img.shields.io/badge/Decionis-${encodeURIComponent(
+    t.label,
+  )}-${t.color}?style=for-the-badge&logo=shield&logoColor=white`;
+}
+
+/**
+ * The embeddable "Governed by Decionis" badge — the viral artifact. Devs drop
+ * it into their own README; every adopting repo links back to the action.
+ * When a verify URL is available it links to the live signed proof.
+ */
+export function governedByBadgeMarkdown(linkUrl = ACTION_URL) {
+  const img =
+    "https://img.shields.io/badge/Governed%20by-Decionis-6D28D9?logo=shield&logoColor=white";
+  return `[![Governed by Decionis](${img})](${linkUrl})`;
+}
+
+/**
+ * Build the PR comment body. Pure + testable. Carries a hidden marker so the
+ * comment is updated in place (no comment spam across pushes).
+ */
+export function buildPrCommentBody({
+  decision,
+  dossierId,
+  verifyUrl,
+  policyVersion,
+  reasonCode,
+  runMode,
+  failOn,
+  showAttribution = true,
+}) {
+  const t = verdictTheme(decision);
+  const rows = [
+    `| **Verdict** | \`${decision || "unknown"}\` |`,
+    policyVersion ? `| **Policy** | \`${policyVersion}\` |` : "",
+    reasonCode ? `| **Reason** | \`${reasonCode}\` |` : "",
+    dossierId ? `| **Dossier** | \`${dossierId}\` |` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const modeNote =
+    runMode === "shadow"
+      ? "> 🟣 **Shadow mode** — recorded for review only. This check never fails your build."
+      : `> Enforcing — this check fails the run on \`${failOn}\`.`;
+
+  const lines = [
+    COMMENT_MARKER,
+    `<img alt="Decionis verdict: ${t.label}" src="${verdictBadgeUrl(decision)}" />`,
+    "",
+    `### ${t.emoji} Governed step — ${t.label}`,
+    "",
+    "| | |",
+    "| --- | --- |",
+    rows,
+    "",
+    verifyUrl
+      ? `**[🔎 Verify this decision →](${verifyUrl})** — signed, tamper-evident proof.`
+      : "",
+    "",
+    modeNote,
+  ];
+
+  if (showAttribution) {
+    lines.push(
+      "",
+      "---",
+      `<sub>🛡️ Governed by <a href="${BRAND_URL}/?source=gha_pr_comment">Decionis</a> · ` +
+        `gate your own deploys, releases &amp; infra with ` +
+        `<a href="${ACTION_URL}"><code>decionis/govern</code></a></sub>`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
+const GH_HEADERS = (token) => ({
+  Authorization: `Bearer ${token}`,
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+});
+
+/** Find a previously-posted Decionis comment on the PR (by hidden marker). */
+async function findDecionisCommentId(repoFullName, prNumber, githubToken) {
   try {
     const res = await fetch(
-      `https://api.github.com/repos/${repoFullName}/issues/${prNumber}/comments`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${githubToken}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-        body: JSON.stringify({ body }),
-      },
+      `https://api.github.com/repos/${repoFullName}/issues/${prNumber}/comments?per_page=100`,
+      { headers: GH_HEADERS(githubToken) },
     );
+    if (!res.ok) return null;
+    const comments = await res.json();
+    if (!Array.isArray(comments)) return null;
+    const existing = comments.find(
+      (c) => typeof c?.body === "string" && c.body.includes(COMMENT_MARKER),
+    );
+    return existing?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Upsert the PR comment: update our existing comment in place if present,
+ * otherwise create one. Sticky-by-marker so re-runs never spam the thread —
+ * a noisy bot is an uninstalled bot.
+ */
+async function upsertPrComment(repoFullName, prNumber, githubToken, body) {
+  if (!repoFullName || !prNumber || !githubToken) return false;
+  try {
+    const existingId = await findDecionisCommentId(repoFullName, prNumber, githubToken);
+    const url = existingId
+      ? `https://api.github.com/repos/${repoFullName}/issues/comments/${existingId}`
+      : `https://api.github.com/repos/${repoFullName}/issues/${prNumber}/comments`;
+    const res = await fetch(url, {
+      method: existingId ? "PATCH" : "POST",
+      headers: GH_HEADERS(githubToken),
+      body: JSON.stringify({ body }),
+    });
     return res.ok;
   } catch {
     return false;
   }
 }
 
-async function maybeCommentPr({ enabled, decision, dossierId, verifyUrl, policyVersion }) {
+async function maybeCommentPr({
+  enabled,
+  decision,
+  dossierId,
+  verifyUrl,
+  policyVersion,
+  reasonCode,
+  runMode,
+  failOn,
+  showAttribution,
+}) {
   if (!enabled) return;
   if (process.env.GITHUB_EVENT_NAME !== "pull_request") return;
   const repoFullName = process.env.GITHUB_REPOSITORY;
@@ -158,16 +297,17 @@ async function maybeCommentPr({ enabled, decision, dossierId, verifyUrl, policyV
     return;
   }
   if (!prNumber) return;
-  const verdictBadge =
-    decision === "allow" ? "✅ Allowed" : decision === "block" ? "🛑 Blocked" : `⚠️ ${decision}`;
-  const body = [
-    `**Decionis · governed step verdict** — ${verdictBadge}`,
-    "",
-    `- Dossier: \`${dossierId}\``,
-    `- Policy version: \`${policyVersion ?? "unknown"}\``,
-    `- [View verification →](${verifyUrl})`,
-  ].join("\n");
-  await postPrComment(repoFullName, prNumber, githubToken, body);
+  const body = buildPrCommentBody({
+    decision,
+    dossierId,
+    verifyUrl,
+    policyVersion,
+    reasonCode,
+    runMode,
+    failOn,
+    showAttribution,
+  });
+  await upsertPrComment(repoFullName, prNumber, githubToken, body);
 }
 
 async function main() {
@@ -180,6 +320,7 @@ async function main() {
   const runModeRaw = (getInput("mode") || "enforce").trim().toLowerCase();
   const runMode = RUN_MODES.has(runModeRaw) ? runModeRaw : "enforce";
   const commentPr = getBooleanInput("comment-pr", false);
+  const showAttribution = getBooleanInput("show-attribution", true);
   const apiBaseUrl = (getInput("api-base-url") || "https://api.decionis.com").replace(/\/$/, "");
   const siteBaseUrl = (getInput("site-base-url") || "https://decionis.com").replace(/\/$/, "");
   const timeoutMs = Number(getInput("request-timeout-ms") || "20000") || 20000;
@@ -241,6 +382,7 @@ async function main() {
   const reasonCode =
     (Array.isArray(data?.reason_codes) && data.reason_codes[0]) ?? data?.reason_code ?? null;
   const verifyUrl = dossierId ? buildVerifyUrl(siteBaseUrl, dossierId, signature) : "";
+  const badgeMarkdown = governedByBadgeMarkdown(verifyUrl || ACTION_URL);
 
   await Promise.all([
     setOutput("decision", decision),
@@ -248,27 +390,36 @@ async function main() {
     setOutput("verify-url", verifyUrl),
     setOutput("policy-version", policyVersion ?? ""),
     setOutput("reason-code", reasonCode ?? ""),
+    setOutput("badge-markdown", badgeMarkdown),
   ]);
 
-  const verdictLine =
-    decision === "allow"
-      ? `✅ Decionis verdict: **allow** (policy ${policyVersion ?? "—"})`
-      : decision === "block"
-        ? `🛑 Decionis verdict: **block** (policy ${policyVersion ?? "—"})`
-        : `⚠️ Decionis verdict: **${decision}** (policy ${policyVersion ?? "—"})`;
-
+  const theme = verdictTheme(decision);
   await writeSummary(
     [
-      "## Decionis · Governed step",
+      `## ${theme.emoji} Decionis — Governed step: ${theme.label}`,
       "",
-      verdictLine,
+      `<img alt="Decionis verdict: ${theme.label}" src="${verdictBadgeUrl(decision)}" />`,
       "",
-      dossierId ? `- Dossier: \`${dossierId}\`` : "",
-      reasonCode ? `- Reason: \`${reasonCode}\`` : "",
-      verifyUrl ? `- [View verification →](${verifyUrl})` : "",
-      runMode === "shadow"
-        ? "- _Shadow mode — step will not fail regardless of verdict._"
-        : `- _Fail-on: \`${failOn}\`_`,
+      "| | |",
+      "| --- | --- |",
+      `| **Verdict** | \`${decision || "unknown"}\` |`,
+      `| **Policy** | \`${policyVersion ?? "—"}\` |`,
+      reasonCode ? `| **Reason** | \`${reasonCode}\` |` : "",
+      dossierId ? `| **Dossier** | \`${dossierId}\` |` : "",
+      `| **Mode** | \`${runMode}\`${runMode === "shadow" ? " — never fails the build" : ` · fail-on \`${failOn}\``} |`,
+      "",
+      verifyUrl
+        ? `**[🔎 Verify this decision →](${verifyUrl})** — signed, tamper-evident proof.`
+        : "",
+      "",
+      "<details><summary>📌 Add the “Governed by Decionis” badge to your README</summary>",
+      "",
+      "```markdown",
+      governedByBadgeMarkdown(),
+      "```",
+      "",
+      `Gate your own deploys, releases, and infra changes → [**decionis/govern**](${ACTION_URL})`,
+      "</details>",
     ]
       .filter(Boolean)
       .join("\n"),
@@ -276,7 +427,17 @@ async function main() {
 
   if (decision) logNotice(`Decionis verdict: ${decision} (dossier ${dossierId || "—"})`);
 
-  await maybeCommentPr({ enabled: commentPr, decision, dossierId, verifyUrl, policyVersion });
+  await maybeCommentPr({
+    enabled: commentPr,
+    decision,
+    dossierId,
+    verifyUrl,
+    policyVersion,
+    reasonCode,
+    runMode,
+    failOn,
+    showAttribution,
+  });
 
   if (shouldFail(decision, failOn, runMode)) {
     logError(

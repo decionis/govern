@@ -27,4 +27,4 @@ jobs:
           org-id: ${{ secrets.DECIONIS_ORG_ID }}
           workflow-key: github_pr_change_intent
           mode: shadow
-          comment-pr: 'true'
+          comment-pr: "true"
