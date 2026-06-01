@@ -107,9 +107,21 @@ inputs:
       with the evaluation so the gate governs against — and the Decision Dossier
       records — your repo's policy. The sha256 is the version handle: change the
       file, get a new recorded revision. Set to an empty string to disable.
-      A missing or unreadable file never fails the gate.
+      A missing or unreadable file never fails the gate. A YAML policy file is
+      also accepted — with the default path, `DECIONIS_POLICY.yaml` / `.yml`
+      siblings are tried too.
     required: false
     default: "DECIONIS_POLICY.md"
+  policy-enforce:
+    description: >-
+      When `true`, the structured ```decionis``` rules block in the policy file
+      is compiled into an ACTIVE enforced policy bundle for this org +
+      workflow-key (true GitOps — committing the file changes enforcement, no
+      dashboard). Idempotent by content hash. Default `false` (the file is
+      recorded/versioned but not auto-enforcing). Prose without a rules block is
+      never enforced.
+    required: false
+    default: "false"
 
 outputs:
   decision:
@@ -128,6 +140,10 @@ outputs:
       file was found). The content-addressed version handle for the repo policy.
   policy-path:
     description: "Repo-relative path of the injected policy file, if any."
+  policy-enforced:
+    description: >-
+      "true" when `policy-enforce` was set and a policy file was found (the
+      file's rules block is published as the active enforced bundle).
   reason-code:
     description: "Stable reason code (string) for the verdict, if returned."
   badge-markdown:

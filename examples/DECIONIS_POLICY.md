@@ -57,3 +57,42 @@ AI-generated pull requests in this repository.
   - Start in shadow mode (`mode: shadow`) to see what these rules would do
     without failing builds, then enforce.
 -->
+
+## Enforced rules
+
+The prose above is documentation. The block below is what actually **enforces**
+when the action runs with `policy-enforce: true` — it compiles 1:1 into an
+active policy bundle (idempotent by content hash; change the block, it
+republishes). JSON only; each rule has exactly one of `all` / `any`, and an
+`action` of allow / block / restrain / escalate.
+
+```decionis
+{
+  "version": 1,
+  "rules": [
+    {
+      "name": "Block production deploys during a change freeze",
+      "all": [
+        { "field": "decision_type", "op": "eq", "value": "production-deploy" },
+        { "field": "context.change_freeze", "op": "eq", "value": true }
+      ],
+      "action": "block"
+    },
+    {
+      "name": "Escalate IAM / security-group changes",
+      "any": [
+        { "field": "context.touches_iam", "op": "eq", "value": true },
+        { "field": "context.touches_network", "op": "eq", "value": true }
+      ],
+      "action": "escalate"
+    },
+    {
+      "name": "Restrain AI-authored deploy/infra/migration changes",
+      "all": [
+        { "field": "context.agent_generated", "op": "eq", "value": true }
+      ],
+      "action": "restrain"
+    }
+  ]
+}
+```

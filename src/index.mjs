@@ -473,15 +473,30 @@ async function main() {
   // DECIONIS_POLICY.md convention: read the repo-local policy file (default
   // `DECIONIS_POLICY.md` at the workspace root) and inject it into the decision
   // so the gate evaluates with — and the dossier records — your repo's policy.
-  // Set `policy-file: ""` to disable. Missing/unreadable file never fails the gate.
-  const policyFilePath = (getInput("policy-file") || "DECIONIS_POLICY.md").trim();
-  const policySource = await loadPolicyFile(policyFilePath, {
-    ref: process.env.GITHUB_SHA ?? null,
-  });
+  // A YAML file is also accepted: with the default path, `.yaml`/`.yml`
+  // siblings are tried too. Set `policy-file: ""` to disable. Missing/unreadable
+  // file never fails the gate.
+  const policyFilePath = getInput("policy-file").trim();
+  const policyEnforce = getBooleanInput("policy-enforce", false);
+  const policyCandidates =
+    policyFilePath === "DECIONIS_POLICY.md"
+      ? ["DECIONIS_POLICY.md", "DECIONIS_POLICY.yaml", "DECIONIS_POLICY.yml"]
+      : policyFilePath
+        ? [policyFilePath]
+        : [];
+  let policySource = null;
+  for (const candidate of policyCandidates) {
+    policySource = await loadPolicyFile(candidate, { ref: process.env.GITHUB_SHA ?? null });
+    if (policySource) break;
+  }
   if (policySource) {
+    // Opt-in GitOps enforcement: compiles the file's structured `decionis`
+    // rules block into an ACTIVE enforced policy bundle server-side.
+    if (policyEnforce) policySource.enforce = true;
     payload.decionis_policy = policySource;
     await setOutput("policy-sha256", policySource.sha256);
     await setOutput("policy-path", policySource.path ?? "");
+    await setOutput("policy-enforced", policyEnforce ? "true" : "false");
     logGroup(
       "Decionis policy file",
       `path=${policySource.path} sha256=${policySource.sha256} bytes=${policySource.bytes}${policySource.truncated ? " (referenced by hash; over inline limit)" : ""}`,
