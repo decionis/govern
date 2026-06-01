@@ -100,6 +100,16 @@ inputs:
     description: "Timeout for the evaluate-decision call, in milliseconds."
     required: false
     default: "20000"
+  policy-file:
+    description: >-
+      Path (relative to the repo root) to a `DECIONIS_POLICY.md` policy file to
+      inject into the decision. The file is read, content-hashed, and carried
+      with the evaluation so the gate governs against — and the Decision Dossier
+      records — your repo's policy. The sha256 is the version handle: change the
+      file, get a new recorded revision. Set to an empty string to disable.
+      A missing or unreadable file never fails the gate.
+    required: false
+    default: "DECIONIS_POLICY.md"
 
 outputs:
   decision:
@@ -112,6 +122,12 @@ outputs:
       unfurls with the OG card in Slack / Teams / LinkedIn / X.
   policy-version:
     description: "Policy version (string) that produced the verdict."
+  policy-sha256:
+    description: >-
+      sha256 of the injected `DECIONIS_POLICY.md` content (empty if no policy
+      file was found). The content-addressed version handle for the repo policy.
+  policy-path:
+    description: "Repo-relative path of the injected policy file, if any."
   reason-code:
     description: "Stable reason code (string) for the verdict, if returned."
   badge-markdown:

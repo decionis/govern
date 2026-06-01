@@ -88,6 +88,33 @@ Every verdict produces a signed, public-verifiable [Decision Dossier](https://de
 
 ---
 
+## Your policy — what the gate evaluates against
+
+Every gated action is evaluated against **your organization's policy**: the rules that decide whether an action is **allowed, blocked, restrained, or escalated**. You own those rules.
+
+- **Zero config to start.** Out of the box, Decionis applies a built-in **default policy pack** for your workflow's vertical (core, finance, hospitality, and more), so the 30-second quickstart governs immediately — no policy authoring required.
+- **Make it yours, and it's versioned.** Add or update rules at any time; Decionis **versions every change**, and each verdict's Decision Dossier records exactly **which policy version applied** — so an audit can trace any decision back to the rule that made it.
+- **Bring policy from where it already lives.** Build rules dynamically, **upload or paste** a policy file, or **connect the source of truth** and Decionis keeps the encoded policy in sync — **Google Drive, GitHub, Jira, Confluence, Notion, or SAP.**
+
+The result: the gate isn't a generic check — it enforces _your_ rules, kept current with how your organization actually documents them.
+
+### Policy as a file: `DECIONIS_POLICY.md`
+
+Keep policy where developers already work — in the repo, in Markdown, reviewed by PR. Drop a **`DECIONIS_POLICY.md`** at your repo root and the action reads it, **content-hashes it, and injects it into every decision** — so the gate governs against your repo's policy and the signed Decision Dossier records exactly which policy (by `sha256`) applied. Change the file, get a new recorded revision. No dashboard step.
+
+```yaml
+- uses: decionis/govern@v1
+  with:
+    workflow-key: github_deploy_approval
+    action: production-deploy
+    # policy-file: DECIONIS_POLICY.md   # default; set "" to disable
+    run: ./deploy.sh
+```
+
+Outputs `policy-sha256` + `policy-path`. A missing/unreadable file never fails the gate. See the annotated [example policy](./examples/DECIONIS_POLICY.md) to copy. For an **org-wide** policy, point a Git source connector at your `.github` repo's `DECIONIS_POLICY.md`.
+
+---
+
 ## Govern AI-generated changes
 
 When an AI agent opens a PR or triggers a deploy, gate it **before** it merges or ships:

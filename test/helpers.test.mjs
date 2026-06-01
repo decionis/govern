@@ -4,15 +4,58 @@ import assert from "node:assert/strict";
 import {
   applyActionLabel,
   buildGrantRequestBody,
+  buildPolicySource,
   buildPrCommentBody,
   buildVerifyUrl,
   governedByBadgeMarkdown,
+  loadPolicyFile,
   resolvePayload,
   shouldExecute,
   shouldFail,
   verdictBadgeUrl,
   verdictTheme,
 } from "../src/index.mjs";
+
+describe("buildPolicySource", () => {
+  it("hashes content; the sha256 is the version handle", () => {
+    const a = buildPolicySource("# Policy\nblock prod on fridays\n", { path: "DECIONIS_POLICY.md" });
+    assert.equal(a.type, "decionis_policy_md");
+    assert.equal(a.path, "DECIONIS_POLICY.md");
+    assert.match(a.sha256, /^[0-9a-f]{64}$/);
+    assert.equal(a.truncated, false);
+    assert.equal(a.content, "# Policy\nblock prod on fridays\n");
+    const same = buildPolicySource("# Policy\nblock prod on fridays\n", {});
+    const changed = buildPolicySource("# Policy\nblock prod always\n", {});
+    assert.equal(a.sha256, same.sha256);
+    assert.notEqual(a.sha256, changed.sha256);
+  });
+
+  it("references oversized content by hash only, never silently drops it", () => {
+    const big = "x".repeat(200000);
+    const s = buildPolicySource(big, { path: "DECIONIS_POLICY.md" });
+    assert.equal(s.truncated, true);
+    assert.equal("content" in s, false);
+    assert.equal(s.bytes, 200000);
+    assert.match(s.sha256, /^[0-9a-f]{64}$/);
+  });
+
+  it("carries the git ref when provided", () => {
+    const s = buildPolicySource("policy", { path: "p.md", ref: "abc123" });
+    assert.equal(s.ref, "abc123");
+  });
+});
+
+describe("loadPolicyFile", () => {
+  it("returns null when the path is empty (disabled)", async () => {
+    assert.equal(await loadPolicyFile("", { workspace: "/tmp" }), null);
+  });
+  it("returns null (never throws) when the file is absent", async () => {
+    const r = await loadPolicyFile("DECIONIS_POLICY.md", {
+      workspace: "/nonexistent-decionis-workspace-xyz",
+    });
+    assert.equal(r, null);
+  });
+});
 
 describe("shouldFail", () => {
   it("fails on block when fail-on=block (default)", () => {

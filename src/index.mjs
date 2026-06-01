@@ -6,6 +6,12 @@
 
 import { spawn } from "node:child_process";
 import { appendFile, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { isAbsolute, join } from "node:path";
+
+/** Max policy-file bytes carried inline with a decision (content over this is
+ *  referenced by hash only, never silently dropped). */
+const POLICY_FILE_INLINE_LIMIT = 131072; // 128 KiB
 
 const FAIL_MODES = new Set(["block", "escalate", "block_or_escalate", "never"]);
 const RUN_MODES = new Set(["enforce", "shadow"]);
@@ -95,6 +101,47 @@ export function resolvePayload(rawInput, contextBuilder = buildPayloadFromContex
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new Error(`Decionis: input 'payload' is not valid JSON object: ${reason}`);
+  }
+}
+
+/**
+ * Build the DECIONIS_POLICY.md descriptor that rides along with a decision.
+ * Pure + testable: the content hash is the version handle — a changed file
+ * yields a new sha256, so each policy revision is distinct and recorded.
+ * Content over POLICY_FILE_INLINE_LIMIT is referenced by hash only (with
+ * `truncated: true`) — never silently dropped.
+ */
+export function buildPolicySource(content, { path, ref = null } = {}) {
+  const text = typeof content === "string" ? content : "";
+  const bytes = Buffer.byteLength(text, "utf8");
+  const sha256 = createHash("sha256").update(text, "utf8").digest("hex");
+  const inline = bytes <= POLICY_FILE_INLINE_LIMIT;
+  return {
+    type: "decionis_policy_md",
+    path: path ?? null,
+    ref: ref ?? null,
+    sha256,
+    bytes,
+    truncated: !inline,
+    ...(inline ? { content: text } : {}),
+  };
+}
+
+/**
+ * Read the repo-local policy file (default DECIONIS_POLICY.md at the workspace
+ * root) and return its descriptor, or null if absent/unreadable. Never throws:
+ * a missing or broken policy file must not fail the gate.
+ */
+export async function loadPolicyFile(relPath, { workspace, ref } = {}) {
+  const rel = (relPath ?? "").trim();
+  if (!rel) return null;
+  const root = workspace ?? process.env.GITHUB_WORKSPACE ?? process.cwd();
+  const full = isAbsolute(rel) ? rel : join(root, rel);
+  try {
+    const content = await readFile(full, "utf8");
+    return buildPolicySource(content, { path: rel, ref: ref ?? null });
+  } catch {
+    return null;
   }
 }
 
@@ -422,6 +469,24 @@ async function main() {
   const apiBaseUrl = (getInput("api-base-url") || "https://api.decionis.com").replace(/\/$/, "");
   const siteBaseUrl = (getInput("site-base-url") || "https://decionis.com").replace(/\/$/, "");
   const timeoutMs = Number(getInput("request-timeout-ms") || "20000") || 20000;
+
+  // DECIONIS_POLICY.md convention: read the repo-local policy file (default
+  // `DECIONIS_POLICY.md` at the workspace root) and inject it into the decision
+  // so the gate evaluates with — and the dossier records — your repo's policy.
+  // Set `policy-file: ""` to disable. Missing/unreadable file never fails the gate.
+  const policyFilePath = (getInput("policy-file") || "DECIONIS_POLICY.md").trim();
+  const policySource = await loadPolicyFile(policyFilePath, {
+    ref: process.env.GITHUB_SHA ?? null,
+  });
+  if (policySource) {
+    payload.decionis_policy = policySource;
+    await setOutput("policy-sha256", policySource.sha256);
+    await setOutput("policy-path", policySource.path ?? "");
+    logGroup(
+      "Decionis policy file",
+      `path=${policySource.path} sha256=${policySource.sha256} bytes=${policySource.bytes}${policySource.truncated ? " (referenced by hash; over inline limit)" : ""}`,
+    );
+  }
 
   const requestBody = {
     org_id: orgId,
