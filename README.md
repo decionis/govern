@@ -52,22 +52,9 @@ On `allow` the command runs. On `block`/`escalate` it **never runs** and the ste
 
 Need keys? Create them free at **[decionis.com/quickstart?source=github_action](https://decionis.com/quickstart?source=github_action)** — no card, no call.
 
-### Why a wrapper, not an `if:`
+### Execution Grants — verify at the target
 
-A common pattern is to gate on the output:
-
-```yaml
-- uses: decionis/govern@v1
-  id: gate
-- run: ./deploy.sh
-  if: steps.gate.outputs.decision == 'allow' # ⚠️ advisory — can be deleted
-```
-
-That `if:` is **advisory**. Anyone — or any AI agent editing the workflow — can delete one line and the deploy runs ungoverned. With `run:`, **Decionis owns the execution path**: the command only exists inside the gate, so bypassing it means rewriting the step — a visible, reviewable diff (protect `.github/workflows/**` with CODEOWNERS + branch protection to close that too). The verdict-only + `if:` form still works for cases where you can't wrap the command, but reach for `run:` whenever you actually need to _enforce_.
-
-### Execution Grants — move the trust boundary to the target
-
-A wrapper still lives in the workflow. To make execution **cryptographically** gated, set `request-grant: true`: on an authorizing verdict Decionis mints a short-lived, single-use, Ed25519-signed **Execution Grant**, injected into the command as `DECIONIS_EXECUTION_GRANT`. The deploy target verifies it (offline against the public JWKS, or online to burn the single-use nonce) **before doing anything** — so a rewritten workflow that skips the gate produces no valid grant and the target refuses.
+To make execution **cryptographically** gated, set `request-grant: true`: on an authorizing verdict Decionis mints a short-lived, single-use, Ed25519-signed **Execution Grant**, injected into the command as `DECIONIS_EXECUTION_GRANT`. The deploy target verifies it (offline against the public JWKS, or online to burn the single-use nonce) before it acts.
 
 ```yaml
 - uses: decionis/govern@v1
