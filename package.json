@@ -1,6 +1,6 @@
 {
   "name": "@decionis/github-action",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "description": "Govern a GitHub Actions step on a Decionis Decision Dossier — gate deploys, releases, infra changes, and agent-triggered actions on a signed verdict.",
   "private": true,
   "type": "module",
@@ -26,6 +26,6 @@
     "SECURITY.md",
     "SUPPORT.md"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "homepage": "https://decionis.com/marketplace/github"
 }
