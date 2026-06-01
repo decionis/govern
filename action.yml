@@ -1,6 +1,6 @@
 name: "Decionis Action Gate"
 author: "Decionis"
-description: "Govern high-risk deploys, AI-generated changes, and CI/CD actions before they execute — allow, block, or escalate."
+description: "Runtime guardrail for autonomous AI agents (Claude Code, Cursor, Copilot) and CI/CD — gate agent-triggered deploys, migrations, and infra changes before they execute. Allow, block, restrain, or escalate, with signed audit proof."
 
 branding:
   icon: "shield"

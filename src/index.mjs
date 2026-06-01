@@ -353,9 +353,11 @@ export function buildPrCommentBody({
     lines.push(
       "",
       "---",
-      `<sub>🛡️ Governed by <a href="${BRAND_URL}/?source=gha_pr_comment">Decionis</a> · ` +
-        `gate your own deploys, releases &amp; infra with ` +
-        `<a href="${ACTION_URL}"><code>decionis/govern</code></a></sub>`,
+      `<sub>🛡️ Governed by <a href="${BRAND_URL}/?source=gha_pr_comment">Decionis</a> — ` +
+        `a runtime guardrail for autonomous AI agents &amp; CI/CD: gate deploys, migrations &amp; ` +
+        `infra changes before they execute. ` +
+        `<a href="${BRAND_URL}/quickstart?source=gha_pr_comment">Start in shadow mode in 30s →</a> ` +
+        `(<a href="${ACTION_URL}"><code>decionis/govern</code></a>)</sub>`,
     );
   }
 

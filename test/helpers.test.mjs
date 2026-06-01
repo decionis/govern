@@ -249,6 +249,12 @@ describe("buildPrCommentBody", () => {
     const bare = buildPrCommentBody({ ...base, showAttribution: false });
     assert.doesNotMatch(bare, /Governed by <a/);
   });
+  it("attribution carries the AI-agent guardrail CTA + shadow-mode quickstart", () => {
+    const body = buildPrCommentBody(base);
+    assert.match(body, /autonomous AI agents/);
+    assert.match(body, /shadow mode in 30s/);
+    assert.match(body, /quickstart\?source=gha_pr_comment/);
+  });
 });
 
 describe("applyActionLabel", () => {

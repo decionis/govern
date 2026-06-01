@@ -1,6 +1,6 @@
 # 🛡️ Decionis Action Gate
 
-**Govern high-risk actions before they execute.**
+**A runtime guardrail for autonomous AI agents — and your CI/CD.**
 
 [![Marketplace](https://img.shields.io/github/v/release/decionis/govern?label=marketplace&logo=githubactions&logoColor=white&color=6D28D9)](https://github.com/marketplace/actions/decionis-action-gate)
 [![Governed by Decionis](https://img.shields.io/badge/Governed%20by-Decionis-6D28D9?logo=shield&logoColor=white)](https://github.com/decionis/govern)
@@ -8,7 +8,9 @@
 
 > **Before software executes, Decionis decides whether it's allowed to.**
 
-GitHub Actions runs the code. **Decionis decides whether the run is authorized.** Add one step and every deploy, migration, infra change, or AI-generated PR is evaluated against your policy, approvals, and risk — then **allowed, blocked, or escalated** before it executes, with a signed Decision Dossier as audit-ready proof.
+AI coding agents now open PRs, rewrite workflows, write migrations, and trigger deploys. GitHub Actions runs the code — **Decionis decides whether the run is authorized.** Add one step and every deploy, migration, infra change, or AI-generated PR is evaluated against your organization's policy, approvals, and risk — then **allowed, blocked, restrained, or escalated** before it executes, with a signed Decision Dossier as audit-ready proof.
+
+> **What it is — and isn't.** Decionis is a runtime **execution gate**: it governs whether an _action_ may run, for both human- and agent-triggered steps. It is **not** a code scanner or SAST tool — it doesn't analyze source for vulnerabilities; it enforces your policy on the action about to execute.
 
 Start in **shadow mode** — it never fails your build, so you see exactly what Decionis would govern. Enforce with one line when you're ready.
 
