@@ -1,7 +1,6 @@
-# Tier 3 — credential broker. The deploy box holds NO standing credentials.
-# Decionis mints a signed grant only on `allow`, and the deploy step exchanges
-# that grant for the registry token at run time. Skip the gate → no grant →
-# redeem returns nothing → deploy fails closed.
+# Brokered credentials — keep deploy secrets out of CI entirely. Decionis holds
+# the registry token; the deploy step receives it only in exchange for an
+# authorized run, so an unauthorized deploy has nothing to deploy with.
 #
 # One-time setup (org admin), registering the target's secret with Decionis:
 #   curl -X POST "$API/v1/protocol/targets/credentials" \
@@ -42,8 +41,8 @@ jobs:
           API: https://api.decionis.com
         run: |
           set -euo pipefail
-          # Exchange the single-use grant for the registry token. Fails closed
-          # (non-zero) if the grant is missing, expired, or not authorized.
+          # Exchange the authorized run for the registry token.
+          
           CRED=$(curl -fsS -X POST "$API/v1/protocol/execution-grants/redeem" \
             -H "Authorization: Bearer $DECIONIS_API_KEY" \
             -H 'content-type: application/json' \

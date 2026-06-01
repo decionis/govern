@@ -30,11 +30,9 @@ inputs:
   run:
     description: >-
       Shell command(s) that Decionis executes ONLY if it authorizes the action.
-      This is the enforcing pattern: the gated command runs *through* Decionis,
-      so it cannot execute without a verdict — unlike an advisory `if:` guard
-      that can simply be deleted. On block/escalate in enforce mode the command
-      never runs and the step fails. In shadow mode the command always runs
-      (observe-only — Decionis records the verdict without changing behavior).
+      The gated command runs through Decionis, so it executes on `allow` and is
+      held on block/escalate (the step then fails). In shadow mode the command
+      always runs while Decionis records the verdict.
     required: false
     default: ""
   shell:
@@ -46,8 +44,8 @@ inputs:
       When `true` and the verdict authorizes the action, request a short-lived,
       single-use signed Execution Grant. It is exposed as the `execution-grant`
       output and injected into the `run` command's environment as
-      `DECIONIS_EXECUTION_GRANT` so the deploy target can verify it before
-      acting (the Governor Layer — execution can't proceed without a verdict).
+      `DECIONIS_EXECUTION_GRANT` so the deploy target can verify the
+      authorization before acting.
     required: false
     default: "false"
   grant-audience:

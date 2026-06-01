@@ -1,8 +1,7 @@
-# Tier 3b — OIDC federation (GCP Workload Identity Federation).
-# The deploy obtains GCP credentials only by presenting a Decionis-issued OIDC
-# token carrying decision=allow. GCP's own STS enforces the verdict via the
-# provider's attribute-condition (assertion.decision == 'allow'); no workflow
-# edit can mint credentials without a Decionis verdict.
+# GCP Workload Identity Federation — the cloud issues credentials only for a
+# Decionis-authorized deploy. The deploy presents a Decionis-issued OIDC token
+# carrying decision=allow, and GCP's own STS requires it via the provider's
+# attribute-condition (assertion.decision == 'allow').
 #
 # One-time GCP setup: see
 # docs/architecture/execution-authority-tier3b-oidc-federation.md §3.

@@ -10,7 +10,7 @@
 
 GitHub Actions runs the code. **Decionis decides whether the run is authorized.** Add one step and every deploy, migration, infra change, or AI-generated PR is evaluated against your policy, approvals, and risk — then **allowed, blocked, or escalated** before it executes, with a signed Decision Dossier as audit-ready proof.
 
-Start in **shadow mode**, where it _never fails your build_ — observe what it would have caught, then flip one line to `enforce`.
+Start in **shadow mode** — it never fails your build, so you see exactly what Decionis would govern. Enforce with one line when you're ready.
 
 ---
 
@@ -52,9 +52,9 @@ On `allow` the command runs. On `block`/`escalate` it **never runs** and the ste
 
 Need keys? Create them free at **[decionis.com/quickstart?source=github_action](https://decionis.com/quickstart?source=github_action)** — no card, no call.
 
-### Execution Grants — verify at the target
+### Cryptographic proof, verified at the target
 
-To make execution **cryptographically** gated, set `request-grant: true`: on an authorizing verdict Decionis mints a short-lived, single-use, Ed25519-signed **Execution Grant**, injected into the command as `DECIONIS_EXECUTION_GRANT`. The deploy target verifies it (offline against the public JWKS, or online to burn the single-use nonce) before it acts.
+Set `request-grant: true` and every authorized run carries a short-lived, single-use, signed **Execution Grant** — `DECIONIS_EXECUTION_GRANT` in the command's environment. Your deploy target verifies it against Decionis's public keys before it acts, so authorization is proven where the action actually happens.
 
 ```yaml
 - uses: decionis/govern@v1
@@ -63,14 +63,12 @@ To make execution **cryptographically** gated, set `request-grant: true`: on an 
     action: production-deploy
     request-grant: true
     grant-audience: prod-us-east
-    run: ./deploy.sh # reads $DECIONIS_EXECUTION_GRANT, presents it to the target
+    run: ./deploy.sh # presents $DECIONIS_EXECUTION_GRANT to the target
 ```
 
-Full design: [`docs/architecture/execution-authority-governor-layer.md`](https://github.com/decionis/govern). Verify endpoints: `POST /v1/protocol/execution-grants/verify` and the JWKS at `/.well-known/decionis-execution-grant-jwks.json`.
+### Zero standing credentials
 
-### Tier 3 — brokered credentials (no standing secrets)
-
-The strongest form: the deploy box holds **no** credentials. Register a target's secret with Decionis once, then exchange the grant for it at run time — skip the gate and `redeem` returns nothing, so the deploy fails closed. See [`examples/gate-deploy-broker.yml`](./examples/gate-deploy-broker.yml) and `POST /v1/protocol/execution-grants/redeem`.
+Take secrets out of CI entirely. Register a target's credential with Decionis once, and it's released only in exchange for an authorized run — your pipeline holds nothing to leak. See [`examples/gate-deploy-broker.yml`](./examples/gate-deploy-broker.yml), or federate **GCP Workload Identity Federation** / **Azure** so the cloud issues credentials only for a Decionis-authorized deploy.
 
 ---
 
@@ -82,7 +80,7 @@ One verdict before execution — **`allow`**, **`block`**, or **`escalate`**. Co
 
 ### 2. 🟣 Shadow Mode
 
-`mode: shadow` records what _would_ have been blocked without ever failing a build. Watch the would-have-blocked numbers, then enforce when the evidence convinces you.
+`mode: shadow` shows exactly what Decionis would govern, without ever failing a build. Enforce when you're ready — one line.
 
 ### 3. 🧾 Decision Dossiers
 
@@ -90,7 +88,7 @@ Every verdict produces a signed, public-verifiable [Decision Dossier](https://de
 
 ---
 
-## Lead use case — govern AI-generated changes
+## Govern AI-generated changes
 
 When an AI agent opens a PR or triggers a deploy, gate it **before** it merges or ships:
 
@@ -118,7 +116,7 @@ See [`examples/gate-ai-agent-pr.yml`](./examples/gate-ai-agent-pr.yml) for the f
 
 ## What reviewers see on the PR
 
-A single, **self-updating** comment (re-runs edit it in place — no thread spam):
+A single, **self-updating** comment — it stays current on every run:
 
 ![Example Decionis PR comment — Blocked verdict with a signed verify link](./assets/pr-comment.svg)
 
@@ -138,17 +136,17 @@ Show your pipeline is governed — and let other devs discover the gate. Also em
 
 Copy-paste workflows in [`examples/`](./examples/):
 
-| Recipe                                                              | What it gates                                                             |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| [`gate-ai-agent-pr.yml`](./examples/gate-ai-agent-pr.yml)           | AI-generated PRs (Claude Code, Copilot, Cursor…) before merge.            |
-| [`gate-deploy.yml`](./examples/gate-deploy.yml)                     | A production deploy on a `block` verdict (enforce).                       |
-| [`gate-terraform.yml`](./examples/gate-terraform.yml)               | `terraform apply` on the plan's blast radius.                             |
-| [`gate-release.yml`](./examples/gate-release.yml)                   | A verdict before a tagged release ships.                                  |
-| [`auto-merge-dependabot.yml`](./examples/auto-merge-dependabot.yml) | Auto-merge a dependency PR only when the verdict is `allow`.              |
-| [`gate-pr-comment.yml`](./examples/gate-pr-comment.yml)             | Shadow-mode evaluator that comments without failing the build.            |
-| [`gate-deploy-broker.yml`](./examples/gate-deploy-broker.yml)       | Tier 3 — redeem the grant for a brokered credential (no standing secret). |
-| [`gate-deploy-gcp-wif.yml`](./examples/gate-deploy-gcp-wif.yml)     | Tier 3b — GCP Workload Identity Federation (cloud enforces the verdict).  |
-| [`gate-deploy-azure.yml`](./examples/gate-deploy-azure.yml)         | Tier 3b — Azure federated credentials.                                    |
+| Recipe                                                              | What it gates                                                                    |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| [`gate-ai-agent-pr.yml`](./examples/gate-ai-agent-pr.yml)           | AI-generated PRs (Claude Code, Copilot, Cursor…) before merge.                   |
+| [`gate-deploy.yml`](./examples/gate-deploy.yml)                     | A production deploy on a `block` verdict (enforce).                              |
+| [`gate-terraform.yml`](./examples/gate-terraform.yml)               | `terraform apply` on the plan's blast radius.                                    |
+| [`gate-release.yml`](./examples/gate-release.yml)                   | A verdict before a tagged release ships.                                         |
+| [`auto-merge-dependabot.yml`](./examples/auto-merge-dependabot.yml) | Auto-merge a dependency PR only when the verdict is `allow`.                     |
+| [`gate-pr-comment.yml`](./examples/gate-pr-comment.yml)             | Shadow-mode evaluator that comments without failing the build.                   |
+| [`gate-deploy-broker.yml`](./examples/gate-deploy-broker.yml)       | Release deploy credentials only for an authorized run — no standing secrets.     |
+| [`gate-deploy-gcp-wif.yml`](./examples/gate-deploy-gcp-wif.yml)     | GCP Workload Identity Federation — the cloud issues credentials only on `allow`. |
+| [`gate-deploy-azure.yml`](./examples/gate-deploy-azure.yml)         | Azure federated credentials — the cloud issues credentials only on `allow`.      |
 
 ## Inputs
 
@@ -160,7 +158,7 @@ Copy-paste workflows in [`examples/`](./examples/):
 | `action`             | no       | —                             | Short label for what's being gated (e.g. `production-deploy`).     |
 | `run`                | no       | —                             | Command Decionis runs **only if authorized** (the enforcing path). |
 | `shell`              | no       | `bash`                        | Shell for `run` — `bash` or `sh`.                                  |
-| `request-grant`      | no       | `false`                       | Mint a signed Execution Grant on allow (Governor Layer).           |
+| `request-grant`      | no       | `false`                       | Issue a signed Execution Grant on an authorizing verdict.          |
 | `grant-audience`     | no       | —                             | Bind the grant to a target/env id (e.g. `prod-us-east`).           |
 | `payload`            | no       | _built from workflow context_ | JSON object describing the action being gated.                     |
 | `fail-on`            | no       | `block`                       | `block` / `escalate` / `block_or_escalate` / `never`.              |

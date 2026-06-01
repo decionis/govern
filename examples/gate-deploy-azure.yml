@@ -1,8 +1,7 @@
-# Tier 3b — OIDC federation (Azure federated identity credentials).
-# The deploy obtains Azure credentials only by presenting a Decionis-issued OIDC
-# token. Azure's federated credential matches on issuer + subject + audience and
-# Decionis only mints the token on decision=allow, so an unauthorized run gets
-# no token and Azure issues no credential.
+# Azure federated credentials — the cloud issues credentials only for a
+# Decionis-authorized deploy. The deploy presents a Decionis-issued OIDC token;
+# Azure's federated credential matches it on issuer + subject + audience, and
+# Decionis issues the token only on decision=allow.
 #
 # One-time Azure setup (federated credential on a user-assigned managed identity
 # or app registration) — see
@@ -51,7 +50,7 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
           set -euo pipefail
-          # Mint the Decionis OIDC token (single-use; fails closed if not allowed).
+          # Request the Decionis OIDC token (single-use, issued only on an authorized run).
           ID_TOKEN=$(curl -fsS -X POST "$API/v1/protocol/execution-grants/exchange-oidc" \
             -H "Authorization: Bearer $DECIONIS_API_KEY" \
             -H 'content-type: application/json' \
