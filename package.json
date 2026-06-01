@@ -1,6 +1,6 @@
 {
   "name": "@decionis/github-action",
-  "version": "1.7.0",
+  "version": "1.7.2",
   "description": "Govern a GitHub Actions step on a Decionis Decision Dossier — gate deploys, releases, infra changes, and agent-triggered actions on a signed verdict.",
   "private": true,
   "type": "module",

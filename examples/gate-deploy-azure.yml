@@ -9,7 +9,7 @@
 # docs/architecture/execution-authority-tier3b-oidc-federation.md §4:
 #   az identity federated-credential create \
 #     --name decionis-prod --identity-name deploy-mi --resource-group rg \
-#     --issuer "https://api.decionis.com/oidc/execution-grants" \
+#     --issuer "https://api.decionis.com/v1/oidc/execution-grants" \
 #     --subject "octo/repo@<sha-or-stable-subject>" \
 #     --audiences "api://AzureADTokenExchange"
 
