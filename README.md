@@ -1,18 +1,14 @@
 # 🛡️ Decionis Action Gate
 
-**A runtime guardrail for autonomous AI agents — and your CI/CD.**
+**Stop unauthorized deploys, migrations, and infra changes before they reach production — whether a teammate or an AI agent triggered them.**
 
 [![Marketplace](https://img.shields.io/github/v/release/decionis/govern?label=marketplace&logo=githubactions&logoColor=white&color=6D28D9)](https://github.com/marketplace/actions/decionis-action-gate)
 [![Governed by Decionis](https://img.shields.io/badge/Governed%20by-Decionis-6D28D9?logo=shield&logoColor=white)](https://github.com/decionis/govern)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 
-> **Before software executes, Decionis decides whether it's allowed to.**
+Add **one step** to your workflow, and every deploy, migration, infra change, or AI-generated PR is checked against **your** policy — then **allowed, blocked, or escalated before it runs**, with a signed, verifiable record of every decision.
 
-AI coding agents now open PRs, rewrite workflows, write migrations, and trigger deploys. GitHub Actions runs the code — **Decionis decides whether the run is authorized.** Add one step and every deploy, migration, infra change, or AI-generated PR is evaluated against your organization's policy, approvals, and risk — then **allowed, blocked, restrained, or escalated** before it executes, with a signed Decision Dossier as audit-ready proof.
-
-> **What it is — and isn't.** Decionis is a runtime **execution gate**: it governs whether an _action_ may run, for both human- and agent-triggered steps. It is **not** a code scanner or SAST tool — it doesn't analyze source for vulnerabilities; it enforces your policy on the action about to execute.
-
-Start in **shadow mode** — it never fails your build, so you see exactly what Decionis would govern. Enforce with one line when you're ready.
+**Try it in 30 seconds, risk-free.** Start in shadow mode: it records what _would_ be governed without ever failing a build — so you see the value before you enforce anything.
 
 ---
 
@@ -23,6 +19,13 @@ AI coding agents — **Claude Code, Copilot, Cursor, Codex, OpenHands** — now 
 > **Should this action be allowed to execute?**
 
 That's the Action Gate.
+
+## Why Decionis
+
+- **One verdict per governed action** — `allow` / `block` / `restrain` / `escalate`, evaluated against _your_ policy before anything runs.
+- **Deterministic policy you own** — versioned rules, committed as `DECIONIS_POLICY.md` or connected from where policy already lives; every verdict cites the version that applied.
+- **Cryptographic proof** — each decision is a signed, public-verifiable Decision Dossier: audit-ready evidence of what was authorized and why.
+- **Zero-friction adoption** — start in shadow mode in 30 seconds; it never fails a build until you choose to enforce.
 
 ## 30-second quickstart
 
@@ -74,17 +77,17 @@ Take secrets out of CI entirely. Register a target's credential with Decionis on
 
 ---
 
-## Three concepts
+## What you get
 
-### 1. 🚦 Action Gate
+### 1. 🚦 A verdict before anything runs
 
 One verdict before execution — **`allow`**, **`block`**, or **`escalate`**. Composable into any later step via `steps.<id>.outputs.decision`.
 
-### 2. 🟣 Shadow Mode
+### 2. 🟣 A zero-risk way to start
 
-`mode: shadow` shows exactly what Decionis would govern, without ever failing a build. Enforce when you're ready — one line.
+`mode: shadow` shows exactly what would be governed, without ever failing a build. Enforce when you're ready — one line.
 
-### 3. 🧾 Decision Dossiers
+### 3. 🧾 Proof you can hand an auditor
 
 Every verdict produces a signed, public-verifiable [Decision Dossier](https://decionis.com/dossier-example?source=github_action): **why** it happened, **who** approved it, **which policy** applied, and the **risk**. The verify link unfurls as an OG card in Slack / Teams / LinkedIn — paste it in an incident, a change ticket, or an audit and it holds up.
 
