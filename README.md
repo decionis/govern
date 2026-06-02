@@ -27,6 +27,19 @@ That's the Action Gate.
 - **Cryptographic proof** — each decision is a signed, public-verifiable Decision Dossier: audit-ready evidence of what was authorized and why.
 - **Zero-friction adoption** — start in shadow mode in 30 seconds; it never fails a build until you choose to enforce.
 
+## Set it up in one step
+
+Pick whichever is fastest — both drop a **shadow-mode** gate in, so nothing fails your build on day one:
+
+- **New repo:** [**Use this template →**](https://github.com/decionis/agent-safe-pipeline/generate) a ready-wired pipeline + `DECIONIS_POLICY.md`.
+- **Existing repo, one command:**
+  ```bash
+  curl -fsSL https://decionis.com/govern/install.sh | sh
+  ```
+  Writes the workflow + `DECIONIS_POLICY.md` (no secrets touched). Add `--pr` to open the PR for you.
+
+Then add your `DECIONIS_API_KEY` / `DECIONIS_ORG_ID` secrets — [free keys here](https://decionis.com/quickstart?source=github_action).
+
 ## 30-second quickstart
 
 **Wrap the command you want to govern.** Decionis runs it _through_ the gate, so it can't execute without an authorizing verdict:
