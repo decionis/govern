@@ -1,6 +1,6 @@
-name: "Decionis Action Gate — runtime guardrail for AI agents & CI/CD"
+name: "Decionis Action Gate"
 author: "Decionis"
-description: "Gate what autonomous AI agents (Claude Code, Cursor, Copilot) and your CI/CD execute — deploys, migrations, infra — with signed audit proof."
+description: "Runtime guardrail for autonomous AI agents & CI/CD — gate deploys, migrations & infra before they run, with signed proof."
 
 branding:
   icon: "shield"
