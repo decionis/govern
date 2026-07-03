@@ -129,7 +129,7 @@ Keep policy where developers already work — in the repo, in Markdown, reviewed
     run: ./deploy.sh
 ```
 
-Outputs `policy-sha256` + `policy-path`. A missing/unreadable file never fails the gate. See the annotated [example policy](./examples/DECIONIS_POLICY.md) to copy. For an **org-wide** policy, point a Git source connector at your `.github` repo's `DECIONIS_POLICY.md`.
+Outputs `policy-sha256` + `policy-path`. A missing/unreadable file never fails the gate. See the annotated [example policy](./examples/DECIONIS_POLICY.md) to copy — or the [DevOps/CI example](./examples/DECIONIS_POLICY.devops.md) (escalate infra destroys, restrain applies + release deploys, block during change freeze). For an **org-wide** policy, point a Git source connector at your `.github` repo's `DECIONIS_POLICY.md`.
 
 ---
 
