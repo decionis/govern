@@ -9,12 +9,25 @@ import { appendFile, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 
+import { evaluateDecision, fetchExecutionGrant, parseDecisionResponse } from "./api-client.mjs";
+import { evaluateLocalPolicy } from "./policy-engine.mjs";
+
 /** Max policy-file bytes carried inline with a decision (content over this is
  *  referenced by hash only, never silently dropped). */
 const POLICY_FILE_INLINE_LIMIT = 131072; // 128 KiB
 
 const FAIL_MODES = new Set(["block", "escalate", "block_or_escalate", "never"]);
 const RUN_MODES = new Set(["enforce", "shadow"]);
+const LOCAL_EVAL_MODES = new Set(["auto", "off", "strict"]);
+
+/** Default for the `local-eval` input — the one-line switch for fast-path semantics. */
+export const DEFAULT_LOCAL_EVAL = "auto";
+/** Longest we wait for the background pipeline after the command exits. */
+export const SHADOW_GRACE_CAP_MS = 10_000;
+/** Small allowance past the request-timeout budget for parsing/publishing. */
+export const SHADOW_GRACE_EXTRA_MS = 2_500;
+/** Bound on the best-effort dossier-recording call after a local block. */
+export const BLOCK_RECORD_CAP_MS = 5_000;
 
 /** Read an Action input (GitHub maps inputs to env vars). */
 function getInput(name, { required = false } = {}) {
@@ -41,6 +54,9 @@ function logGroup(title, body) {
 }
 function logError(message) {
   console.log(`::error::${message}`);
+}
+function logWarning(message) {
+  console.log(`::warning::${message}`);
 }
 function logNotice(message) {
   console.log(`::notice::${message}`);
@@ -169,18 +185,101 @@ export function shouldExecute(decision, runMode) {
   return (decision ?? "").toLowerCase() === "allow";
 }
 
-/** Run the gated command through the chosen shell, streaming its output. */
-function executeCommand(command, shell, extraEnv = {}) {
+/**
+ * Start the gated command through the chosen shell, streaming its output.
+ * Returns immediately with the child and an `exited` promise so callers can
+ * run evaluation work concurrently (speculative shadow / async notarization).
+ */
+function startCommand(command, shell, extraEnv = {}) {
   const sh = (shell || "bash").trim() === "sh" ? "sh" : "bash";
   const args = ["-e", "-c", command];
-  return new Promise((resolve) => {
-    const child = spawn(sh, args, { stdio: "inherit", env: { ...process.env, ...extraEnv } });
+  const child = spawn(sh, args, { stdio: "inherit", env: { ...process.env, ...extraEnv } });
+  const exited = new Promise((resolve) => {
     child.on("close", (code) => resolve(code ?? 0));
     child.on("error", (err) => {
       logError(`Decionis could not run the gated command: ${err.message}`);
       resolve(1);
     });
   });
+  return { child, exited };
+}
+
+/** Run the gated command to completion (enforcing path convenience). */
+function executeCommand(command, shell, extraEnv = {}) {
+  return startCommand(command, shell, extraEnv).exited;
+}
+
+/** Sleep helper for bounded grace waits. */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Wrap background/observe-only work: any failure becomes a `::notice::` and
+ * resolves to null. Shadow mode and async notarization must never be able to
+ * change the step's exit code.
+ */
+async function swallow(label, promise) {
+  try {
+    return await promise;
+  } catch (err) {
+    logNotice(`Decionis (non-fatal) ${label}: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
+}
+
+/**
+ * The single decision table for how a run reaches its verdict — the branch
+ * point for the `local-eval` input. Pure + testable.
+ *
+ * act:  "local" = a deterministic committed rule verdict gates the run;
+ *       "api"   = the blocking evaluate-decision call gates it (v1.8 path).
+ * api:  what happens to the network call when act=local —
+ *       "none" (strict: fully offline), "background" (notarize while the
+ *       command runs), "bounded" (notarize with a capped wait), or
+ *       "blocking" when act=api.
+ *
+ * `request-grant: true` always forces the blocking path: the signed grant
+ * must exist before the command's environment is built.
+ */
+export function planEvaluation({ localOutcome, localEval, requestGrant, hasRunCommand }) {
+  const deterministic = Boolean(localOutcome?.deterministic);
+  if (!deterministic || localEval === "off" || requestGrant) {
+    return { act: "api", api: "blocking" };
+  }
+  if (localEval === "strict") return { act: "local", api: "none" };
+  if (localOutcome.outcome === "block") return { act: "local", api: "bounded" };
+  return { act: "local", api: hasRunCommand ? "background" : "bounded" };
+}
+
+/**
+ * Grace budget for the background pipeline after the command exits: whatever
+ * remains of the request-timeout budget plus a small parsing allowance,
+ * capped so a fast command never waits long on a slow API.
+ */
+export function computeGraceMs(pipelineStartMs, nowMs, timeoutMs) {
+  const remaining = Math.max(timeoutMs - (nowMs - pipelineStartMs), 0);
+  return Math.min(remaining + SHADOW_GRACE_EXTRA_MS, SHADOW_GRACE_CAP_MS);
+}
+
+/**
+ * Timing instrumentation: the speedups from local evaluation and speculative
+ * execution must be visible in the log, not just real.
+ */
+export function createTimeline(t0 = performance.now()) {
+  const events = [];
+  const fmt = (ms) => (ms >= 10_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`);
+  return {
+    events,
+    mark(label, detail) {
+      events.push({ label, detail: detail ?? null, at: performance.now() - t0 });
+    },
+    render() {
+      if (events.length === 0) return "Decionis timing — no events recorded";
+      const parts = events.map(
+        (e) => `${e.label}${e.detail ? ` ${e.detail}` : ""} +${fmt(e.at)}`,
+      );
+      return `Decionis timing — ${parts.join(" · ")}`;
+    },
+  };
 }
 
 /**
@@ -202,35 +301,6 @@ export function buildGrantRequestBody({ orgId, dossierId, decision, action, audi
   };
 }
 
-/** Request a signed execution grant from Decionis (returns null on any failure). */
-async function fetchExecutionGrant({ apiBaseUrl, apiKey, body, timeoutMs }) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${apiBaseUrl}/v1/protocol/execution-grants/issue`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-        accept: "application/json",
-        "x-decionis-source": "github_actions",
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      logNotice(`Execution grant not issued (HTTP ${res.status}).`);
-      return null;
-    }
-    return await res.json();
-  } catch (err) {
-    logNotice(`Execution grant request failed: ${err instanceof Error ? err.message : err}`);
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /** Decide whether a given verdict should fail the step under the configured mode. */
 export function shouldFail(decision, failOn, runMode) {
   if (runMode === "shadow") return false;
@@ -245,15 +315,20 @@ export function shouldFail(decision, failOn, runMode) {
   return d === "block" || d === "deny" || d === "denied";
 }
 
-/** Build the canonical public verify URL (with `?sig=` for the OG card). */
-export function buildVerifyUrl(siteBase, dossierId, signature) {
+/**
+ * Build the canonical public verify URL (with `?sig=` for the OG card).
+ * When a policy sha256 is provided, the link additionally pins the exact
+ * repo-policy revision the decision was made under (`&policy=sha256:<hash>`)
+ * — an additive query parameter the server is free to ignore.
+ */
+export function buildVerifyUrl(siteBase, dossierId, signature, { policySha256 } = {}) {
   const base = siteBase.replace(/\/$/, "");
   const id = encodeURIComponent(dossierId);
-  if (signature) {
-    const sig = encodeURIComponent(signature);
-    return `${base}/verify/decision-dossiers/${id}?sig=${sig}&source=github_actions`;
-  }
-  return `${base}/verify/decision-dossiers/${id}?source=github_actions`;
+  const params = [];
+  if (signature) params.push(`sig=${encodeURIComponent(signature)}`);
+  params.push("source=github_actions");
+  if (policySha256) params.push(`policy=${encodeURIComponent(`sha256:${policySha256}`)}`);
+  return `${base}/verify/decision-dossiers/${id}?${params.join("&")}`;
 }
 
 // ───────────────────────── Growth / virality surface ─────────────────────────
@@ -453,15 +528,14 @@ async function maybeCommentPr({
 }
 
 async function main() {
-  const apiKey = getInput("api-key", { required: true });
-  const orgId = getInput("org-id", { required: true });
-  const workflowKey = getInput("workflow-key", { required: true });
+  const timeline = createTimeline();
   const actionLabel = getInput("action").trim();
-  const payload = applyActionLabel(resolvePayload(getInput("payload")), actionLabel);
   const failOnRaw = (getInput("fail-on") || "block").trim().toLowerCase();
   const failOn = FAIL_MODES.has(failOnRaw) ? failOnRaw : "block";
   const runModeRaw = (getInput("mode") || "enforce").trim().toLowerCase();
   const runMode = RUN_MODES.has(runModeRaw) ? runModeRaw : "enforce";
+  const localEvalRaw = (getInput("local-eval") || DEFAULT_LOCAL_EVAL).trim().toLowerCase();
+  const localEval = LOCAL_EVAL_MODES.has(localEvalRaw) ? localEvalRaw : DEFAULT_LOCAL_EVAL;
   const commentPr = getBooleanInput("comment-pr", false);
   const showAttribution = getBooleanInput("show-attribution", true);
   const runCommand = getInput("run");
@@ -471,6 +545,31 @@ async function main() {
   const apiBaseUrl = (getInput("api-base-url") || "https://api.decionis.com").replace(/\/$/, "");
   const siteBaseUrl = (getInput("site-base-url") || "https://decionis.com").replace(/\/$/, "");
   const timeoutMs = Number(getInput("request-timeout-ms") || "20000") || 20000;
+
+  // ── Shadow credential grace ─────────────────────────────────────────────
+  // In shadow mode a missing api-key/org-id/workflow-key must not fail the
+  // step: installer-injected shadow steps stay inert until secrets exist.
+  let apiKey = "";
+  let orgId = "";
+  let workflowKey = "";
+  try {
+    apiKey = getInput("api-key", { required: true });
+    orgId = getInput("org-id", { required: true });
+    workflowKey = getInput("workflow-key", { required: true });
+  } catch (err) {
+    if (runMode !== "shadow") throw err;
+    logNotice(
+      `Decionis shadow mode — ${err instanceof Error ? err.message : err}. ` +
+        "The gate is not configured yet; nothing is recorded and shadow never fails the step.",
+    );
+    if (runCommand) {
+      await setOutput("executed", "true");
+      process.exit(await executeCommand(runCommand, shell));
+    }
+    process.exit(0);
+  }
+
+  const payload = applyActionLabel(resolvePayload(getInput("payload")), actionLabel);
 
   // DECIONIS_POLICY.md convention: read the repo-local policy file (default
   // `DECIONIS_POLICY.md` at the workspace root) and inject it into the decision
@@ -505,6 +604,54 @@ async function main() {
     );
   }
 
+  // ── Local policy engine ─────────────────────────────────────────────────
+  // Evaluate the committed ```decionis rules block in-process (microseconds).
+  // The engine mirrors the server evaluator and yields a deterministic
+  // verdict only for an explicitly matched allow/block rule; everything else
+  // reports a fallback reason and defers to the API.
+  let localOutcome = null;
+  if (localEval !== "off" && policySource) {
+    if (policySource.truncated) {
+      logNotice("Decionis local engine skipped — the policy file exceeds the inline size limit.");
+    } else if (/\.ya?ml$/i.test(policySource.path ?? "")) {
+      logNotice("Decionis local engine skipped — YAML policy files are evaluated by the API.");
+    } else {
+      localOutcome = evaluateLocalPolicy(policySource.content, { payload, orgId, workflowKey });
+      timeline.mark(
+        "local eval",
+        `${localOutcome.status}${localOutcome.outcome ? ` '${localOutcome.outcome}'` : ""} in ${localOutcome.elapsedUs}µs`,
+      );
+      logGroup(
+        "Decionis local policy engine",
+        [
+          `status=${localOutcome.status} outcome=${localOutcome.outcome ?? "—"} deterministic=${localOutcome.deterministic}`,
+          `rules=${localOutcome.ruleCount} elapsed=${localOutcome.elapsedUs}µs local-eval=${localEval}`,
+          localOutcome.matchedRule
+            ? `rule: #${localOutcome.matchedRule.index + 1} "${localOutcome.matchedRule.name}" → ${localOutcome.matchedRule.action}`
+            : "",
+          localOutcome.fallbackReason ? `fallback: ${localOutcome.fallbackReason}` : "",
+          localOutcome.explanation ? `why: ${localOutcome.explanation}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    }
+  }
+
+  const plan = planEvaluation({
+    localOutcome,
+    localEval,
+    requestGrant,
+    hasRunCommand: Boolean(runCommand),
+  });
+  if (plan.act === "local") {
+    logNotice(
+      `⚡ Decionis local verdict '${localOutcome.outcome}' via rule "${localOutcome.matchedRule.name}" ` +
+        `in ${(localOutcome.elapsedUs / 1000).toFixed(2)}ms — API roundtrip ` +
+        `${plan.api === "none" ? "skipped (local-eval: strict)" : "moved off the critical path"}.`,
+    );
+  }
+
   const requestBody = {
     org_id: orgId,
     workflow_key: workflowKey,
@@ -513,127 +660,339 @@ async function main() {
     source: "github_actions",
   };
 
-  logGroup(
-    "Decionis evaluate-decision request",
-    JSON.stringify(
-      {
-        url: `${apiBaseUrl}/v1/protocol/evaluate-decision`,
-        org_id: orgId,
-        workflow_key: workflowKey,
-        mode: requestBody.mode,
-        fail_on: failOn,
-        payload_keys: Object.keys(payload),
-      },
-      null,
-      2,
-    ),
-  );
+  // ── Reporting state ──────────────────────────────────────────────────────
+  // Single-writer discipline: finalizeReport() is the only place that writes
+  // decision outputs, the (append-only) step summary, and the PR comment, and
+  // it runs exactly once per run — background work only mutates `report`.
+  const report = {
+    decision: "",
+    source: "",
+    dossierId: "",
+    signature: null,
+    policyVersion: null,
+    reasonCode: null,
+    mismatch: false,
+    finalized: false,
+  };
+  if (plan.act === "local") {
+    report.decision = localOutcome.outcome;
+    report.source = "local";
+  }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let response;
-  try {
-    response = await fetch(`${apiBaseUrl}/v1/protocol/evaluate-decision`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-        accept: "application/json",
-        "x-decionis-source": "github_actions",
-      },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
+  const abortController = new AbortController();
+
+  const callApi = async (boundMs = timeoutMs) => {
+    logGroup(
+      "Decionis evaluate-decision request",
+      JSON.stringify(
+        {
+          url: `${apiBaseUrl}/v1/protocol/evaluate-decision`,
+          org_id: orgId,
+          workflow_key: workflowKey,
+          mode: requestBody.mode,
+          fail_on: failOn,
+          local_eval: localEval,
+          evaluation_plan: `${plan.act}/${plan.api}`,
+          payload_keys: Object.keys(payload),
+        },
+        null,
+        2,
+      ),
+    );
+    const startedAt = performance.now();
+    const response = await evaluateDecision({
+      apiBaseUrl,
+      apiKey,
+      body: requestBody,
+      timeoutMs: boundMs,
+      signal: abortController.signal,
     });
-  } finally {
-    clearTimeout(timer);
+    if (!response.ok) {
+      const error = new Error(`Decionis evaluate-decision failed (${response.status})`);
+      // @ts-ignore — carried for the enforce-path error log
+      error.status = response.status;
+      // @ts-ignore
+      error.bodyText = response.bodyText;
+      throw error;
+    }
+    const parsed = parseDecisionResponse(response.data);
+    timeline.mark("API verdict", `'${parsed.decision}' in ${Math.round(performance.now() - startedAt)}ms`);
+    return parsed;
+  };
+
+  const adoptApiVerdict = (parsed, { authoritative }) => {
+    report.dossierId = parsed.dossierId;
+    report.signature = parsed.signature;
+    report.policyVersion = parsed.policyVersion;
+    report.reasonCode = parsed.reasonCode;
+    if (authoritative) {
+      report.decision = parsed.decision;
+      report.source = "api";
+    }
+    if (localOutcome?.deterministic && parsed.decision && parsed.decision !== localOutcome.outcome) {
+      report.mismatch = true;
+      logWarning(
+        `Decionis verdict mismatch — local rule verdict '${localOutcome.outcome}'${authoritative ? "" : " (already acted on)"} ` +
+          `vs API verdict '${parsed.decision}'. The signed dossier records the API verdict; ` +
+          "review org-level policy or set local-eval: off for this workflow.",
+      );
+    }
+  };
+
+  const finalizeReport = async () => {
+    if (report.finalized) return;
+    report.finalized = true;
+    const verifyUrl = report.dossierId
+      ? buildVerifyUrl(siteBaseUrl, report.dossierId, report.signature, {
+          policySha256: policySource?.sha256,
+        })
+      : "";
+    const badgeMarkdown = governedByBadgeMarkdown(verifyUrl || ACTION_URL);
+    await Promise.all([
+      setOutput("decision", report.decision),
+      setOutput("decision-source", report.source),
+      setOutput("dossier-id", report.dossierId),
+      setOutput("verify-url", verifyUrl),
+      setOutput("policy-version", report.policyVersion ?? ""),
+      setOutput("reason-code", report.reasonCode ?? ""),
+      setOutput("badge-markdown", badgeMarkdown),
+      setOutput("verdict-mismatch", report.mismatch ? "true" : "false"),
+    ]);
+
+    const theme = verdictTheme(report.decision);
+    await writeSummary(
+      [
+        `## ${theme.emoji} Decionis Action Gate${actionLabel ? ` · \`${actionLabel}\`` : ""}: ${theme.label}`,
+        "",
+        `<img alt="Decionis verdict: ${theme.label}" src="${verdictBadgeUrl(report.decision)}" />`,
+        "",
+        "| | |",
+        "| --- | --- |",
+        `| **Verdict** | \`${report.decision || "unknown"}\` |`,
+        report.source === "local"
+          ? `| **Source** | ⚡ local rule "${localOutcome.matchedRule.name}" in ${localOutcome.elapsedUs}µs |`
+          : report.source
+            ? `| **Source** | \`${report.source}\` |`
+            : "",
+        `| **Policy** | \`${report.policyVersion ?? "—"}\` |`,
+        report.reasonCode ? `| **Reason** | \`${report.reasonCode}\` |` : "",
+        report.dossierId ? `| **Dossier** | \`${report.dossierId}\` |` : "",
+        `| **Mode** | \`${runMode}\`${runMode === "shadow" ? " — never fails the build" : ` · fail-on \`${failOn}\``} |`,
+        "",
+        report.mismatch
+          ? "> ⚠️ The API verdict differed from the local rule verdict (`verdict-mismatch=true`) — review org-level policy."
+          : "",
+        verifyUrl
+          ? `**[🔎 Verify this decision →](${verifyUrl})** — signed, tamper-evident proof${policySource ? ", pinned to this repo's policy revision" : ""}.`
+          : "",
+        "",
+        "<details><summary>📌 Add the “Governed by Decionis” badge to your README</summary>",
+        "",
+        "```markdown",
+        governedByBadgeMarkdown(),
+        "```",
+        "",
+        `Gate your own deploys, releases, and infra changes → [**decionis/govern**](${ACTION_URL})`,
+        "</details>",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+
+    if (report.decision) {
+      logNotice(
+        `Decionis verdict: ${report.decision} (${report.source}${report.dossierId ? `, dossier ${report.dossierId}` : ""})`,
+      );
+    }
+
+    await maybeCommentPr({
+      enabled: commentPr,
+      decision: report.decision,
+      dossierId: report.dossierId,
+      verifyUrl,
+      policyVersion: report.policyVersion,
+      reasonCode: report.reasonCode,
+      runMode,
+      failOn,
+      actionLabel,
+      showAttribution,
+    });
+  };
+
+  // ── Branch A: speculative shadow ─────────────────────────────────────────
+  // The verdict can never change behavior in shadow, so the command starts
+  // IMMEDIATELY and the whole evaluation pipeline runs in the background.
+  // The step's exit code is exactly the command's exit code — evaluation
+  // failures are notices, never errors.
+  if (runMode === "shadow" && runCommand && !requestGrant) {
+    const { exited } = startCommand(runCommand, shell, {});
+    timeline.mark("command started");
+    logNotice(
+      "🟣 Decionis shadow mode — command started immediately; the verdict resolves in the background.",
+    );
+    await setOutput("executed", "true");
+    const pipelineStart = performance.now();
+    const pipeline = swallow(
+      "shadow evaluation",
+      (async () => {
+        if (plan.act === "local" && plan.api === "none") return; // strict: fully offline
+        adoptApiVerdict(await callApi(), { authoritative: true });
+      })(),
+    );
+    const code = await exited;
+    timeline.mark("command exited", `code ${code}`);
+    const graceMs = computeGraceMs(pipelineStart, performance.now(), timeoutMs);
+    const pending = await Promise.race([
+      pipeline.then(() => false),
+      sleep(graceMs).then(() => true),
+    ]);
+    if (pending) {
+      abortController.abort();
+      logNotice(
+        `Decionis shadow verdict still pending after the ${Math.round(graceMs)}ms grace window — completing with the command's exit code.`,
+      );
+    }
+    await finalizeReport();
+    logNotice(timeline.render());
+    process.exit(code);
   }
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    logError(`Decionis API returned ${response.status}: ${text.slice(0, 600)}`);
-    throw new Error(`Decionis evaluate-decision failed (${response.status})`);
+  // ── Branch B: shadow, verdict-only ───────────────────────────────────────
+  if (runMode === "shadow" && !runCommand && !requestGrant) {
+    await swallow(
+      "shadow evaluation",
+      (async () => {
+        if (plan.act === "local" && plan.api === "none") return;
+        adoptApiVerdict(await callApi(), { authoritative: true });
+      })(),
+    );
+    await finalizeReport();
+    logNotice(timeline.render());
+    return; // shadow never fails — not even on API errors
   }
 
-  const data = await response.json();
-  const decision = String(data?.decision ?? data?.outcome ?? "").toLowerCase();
-  const dossierId = String(data?.dossier_id ?? data?.dossier?.dossier_id ?? "");
-  const signature = data?.verification?.signature ?? data?.signature ?? null;
-  const policyVersion = data?.policy_version ?? data?.dossier?.policy_version ?? null;
-  const reasonCode =
-    (Array.isArray(data?.reason_codes) && data.reason_codes[0]) ?? data?.reason_code ?? null;
-  const verifyUrl = dossierId ? buildVerifyUrl(siteBaseUrl, dossierId, signature) : "";
-  const badgeMarkdown = governedByBadgeMarkdown(verifyUrl || ACTION_URL);
+  // ── Branch C/D: enforce, gated by a deterministic local verdict ──────────
+  if (plan.act === "local" && runMode === "enforce") {
+    if (localOutcome.outcome === "block") {
+      // Best-effort dossier recording, tightly bounded: nothing is waiting to
+      // run, but the block should still leave a signed audit trail.
+      if (plan.api === "bounded") {
+        const parsed = await swallow(
+          "dossier recording",
+          callApi(Math.min(timeoutMs, BLOCK_RECORD_CAP_MS)),
+        );
+        if (parsed) adoptApiVerdict(parsed, { authoritative: false });
+      }
+      await finalizeReport();
+      logNotice(timeline.render());
+      if (runCommand) {
+        await setOutput("executed", "false");
+        logError(
+          `Decionis BLOCKED execution locally (rule "${localOutcome.matchedRule.name}", mode=${runMode}). ` +
+            `The gated command was NOT run.${report.dossierId ? ` Dossier: ${report.dossierId}` : ""}`,
+        );
+        process.exit(1);
+      }
+      if (shouldFail("block", failOn, runMode)) {
+        logError(
+          `Decionis blocked this step locally (verdict=block, rule "${localOutcome.matchedRule.name}", fail-on=${failOn}).`,
+        );
+        process.exit(1);
+      }
+      return;
+    }
 
-  await Promise.all([
-    setOutput("decision", decision),
-    setOutput("dossier-id", dossierId),
-    setOutput("verify-url", verifyUrl),
-    setOutput("policy-version", policyVersion ?? ""),
-    setOutput("reason-code", reasonCode ?? ""),
-    setOutput("badge-markdown", badgeMarkdown),
-  ]);
+    // Local allow.
+    if (runCommand) {
+      logNotice("Decionis authorized execution locally — running the gated command.");
+      if (plan.api === "none") {
+        await finalizeReport();
+        await setOutput("executed", "true");
+        timeline.mark("command started");
+        const code = await executeCommand(runCommand, shell, {});
+        timeline.mark("command exited", `code ${code}`);
+        logNotice(timeline.render());
+        process.exit(code);
+      }
+      // auto: start the command now, notarize while it runs.
+      const { exited } = startCommand(runCommand, shell, {});
+      timeline.mark("command started");
+      await setOutput("executed", "true");
+      const pipelineStart = performance.now();
+      const pipeline = swallow(
+        "notarization",
+        (async () => {
+          adoptApiVerdict(await callApi(), { authoritative: false });
+        })(),
+      );
+      const code = await exited;
+      timeline.mark("command exited", `code ${code}`);
+      const graceMs = computeGraceMs(pipelineStart, performance.now(), timeoutMs);
+      const pending = await Promise.race([
+        pipeline.then(() => false),
+        sleep(graceMs).then(() => true),
+      ]);
+      if (pending) {
+        abortController.abort();
+        logNotice(
+          `Decionis notarization still pending after the ${Math.round(graceMs)}ms grace window — completing with the command's exit code.`,
+        );
+      }
+      await finalizeReport();
+      logNotice(timeline.render());
+      process.exit(code);
+    }
 
-  const theme = verdictTheme(decision);
-  await writeSummary(
-    [
-      `## ${theme.emoji} Decionis Action Gate${actionLabel ? ` · \`${actionLabel}\`` : ""}: ${theme.label}`,
-      "",
-      `<img alt="Decionis verdict: ${theme.label}" src="${verdictBadgeUrl(decision)}" />`,
-      "",
-      "| | |",
-      "| --- | --- |",
-      `| **Verdict** | \`${decision || "unknown"}\` |`,
-      `| **Policy** | \`${policyVersion ?? "—"}\` |`,
-      reasonCode ? `| **Reason** | \`${reasonCode}\` |` : "",
-      dossierId ? `| **Dossier** | \`${dossierId}\` |` : "",
-      `| **Mode** | \`${runMode}\`${runMode === "shadow" ? " — never fails the build" : ` · fail-on \`${failOn}\``} |`,
-      "",
-      verifyUrl
-        ? `**[🔎 Verify this decision →](${verifyUrl})** — signed, tamper-evident proof.`
-        : "",
-      "",
-      "<details><summary>📌 Add the “Governed by Decionis” badge to your README</summary>",
-      "",
-      "```markdown",
-      governedByBadgeMarkdown(),
-      "```",
-      "",
-      `Gate your own deploys, releases, and infra changes → [**decionis/govern**](${ACTION_URL})`,
-      "</details>",
-    ]
-      .filter(Boolean)
-      .join("\n"),
-  );
+    // Local allow, verdict-only: notarize with a bounded wait, never fail.
+    if (plan.api !== "none") {
+      const parsed = await swallow("notarization", callApi());
+      if (parsed) adoptApiVerdict(parsed, { authoritative: false });
+    }
+    await finalizeReport();
+    logNotice(timeline.render());
+    return; // an allow verdict never fails the step
+  }
 
-  if (decision) logNotice(`Decionis verdict: ${decision} (dossier ${dossierId || "—"})`);
-
-  await maybeCommentPr({
-    enabled: commentPr,
-    decision,
-    dossierId,
-    verifyUrl,
-    policyVersion,
-    reasonCode,
-    runMode,
-    failOn,
-    actionLabel,
-    showAttribution,
-  });
+  // ── Branch E: blocking API path (v1.8 semantics) ─────────────────────────
+  // Reached on: local-eval off, no/indeterminate local verdict, matched
+  // escalate/restrain, request-grant, or YAML/truncated/absent policy files.
+  let apiVerdict;
+  try {
+    apiVerdict = await callApi();
+  } catch (err) {
+    if (runMode === "shadow") {
+      logNotice(
+        `Decionis shadow mode — evaluation unavailable (${err instanceof Error ? err.message : err}); shadow never fails the step.`,
+      );
+      await finalizeReport();
+      if (runCommand) {
+        await setOutput("executed", "true");
+        process.exit(await executeCommand(runCommand, shell));
+      }
+      return;
+    }
+    // @ts-ignore — status/bodyText attached by callApi for HTTP failures
+    if (err?.status) logError(`Decionis API returned ${err.status}: ${String(err.bodyText ?? "").slice(0, 600)}`);
+    throw err;
+  }
+  adoptApiVerdict(apiVerdict, { authoritative: true });
+  await finalizeReport();
 
   // ── Execution Grant (Governor Layer) ────────────────────────────────────
   // On an authorizing verdict, request a short-lived signed grant. Targets
   // verify it before acting, so execution can't proceed without a Decionis
   // verdict even if the workflow gate is bypassed.
   const grantEnv = {};
-  if (requestGrant && decision === "allow" && dossierId) {
+  if (requestGrant && report.decision === "allow" && report.dossierId) {
     const grant = await fetchExecutionGrant({
       apiBaseUrl,
       apiKey,
       timeoutMs,
+      logNotice,
       body: buildGrantRequestBody({
         orgId,
-        dossierId,
-        decision,
+        dossierId: report.dossierId,
+        decision: report.decision,
         action: actionLabel,
         audience: grantAudience,
       }),
@@ -653,11 +1012,11 @@ async function main() {
   // verdict. There is no skippable `if:` to delete. The grant (if any) is in
   // the command's env as DECIONIS_EXECUTION_GRANT for the target to verify.
   if (runCommand) {
-    const authorized = shouldExecute(decision, runMode);
+    const authorized = shouldExecute(report.decision, runMode);
     await setOutput("executed", authorized ? "true" : "false");
     if (!authorized) {
       logError(
-        `Decionis BLOCKED execution (verdict=${decision}, mode=${runMode}). The gated command was NOT run. Dossier: ${dossierId}`,
+        `Decionis BLOCKED execution (verdict=${report.decision}, mode=${runMode}). The gated command was NOT run. Dossier: ${report.dossierId}`,
       );
       process.exit(1);
     }
@@ -666,19 +1025,23 @@ async function main() {
         ? "Decionis shadow mode — running the gated command (observe-only)."
         : "Decionis authorized execution — running the gated command.",
     );
+    timeline.mark("command started");
     const code = await executeCommand(runCommand, shell, grantEnv);
+    timeline.mark("command exited", `code ${code}`);
+    logNotice(timeline.render());
     process.exit(code);
   }
 
   // ── Advisory path (no `run`) ────────────────────────────────────────────
   // Verdict-only: sets outputs for a downstream `if:`. Note this guard is
   // advisory and can be removed — prefer the `run` wrapper above to enforce.
-  if (shouldFail(decision, failOn, runMode)) {
+  if (shouldFail(report.decision, failOn, runMode)) {
     logError(
-      `Decionis blocked this step (verdict=${decision}, fail-on=${failOn}, mode=${runMode}). Dossier: ${dossierId}`,
+      `Decionis blocked this step (verdict=${report.decision}, fail-on=${failOn}, mode=${runMode}). Dossier: ${report.dossierId}`,
     );
     process.exit(1);
   }
+  logNotice(timeline.render());
 }
 
 const isMain = (() => {

@@ -71,7 +71,11 @@ inputs:
   mode:
     description: >-
       `enforce` (default) or `shadow`. In shadow mode the Action records a
-      verdict but never fails the step — useful for week-one rollouts.
+      verdict but never fails the step — useful for week-one rollouts. Shadow
+      is also speculative: a `run` command starts immediately while the verdict
+      resolves in the background, so the gate adds ~zero latency; evaluation
+      failures (API errors, missing credentials) become notices, never step
+      failures, and the step's exit code is exactly the command's.
     required: false
     default: "enforce"
   comment-pr:
@@ -97,7 +101,9 @@ inputs:
     required: false
     default: "https://decionis.com"
   request-timeout-ms:
-    description: "Timeout for the evaluate-decision call, in milliseconds."
+    description: >-
+      Timeout for the evaluate-decision call, in milliseconds. Also budgets the
+      post-command grace window for background notarization (capped at 10s).
     required: false
     default: "20000"
   policy-file:
@@ -122,10 +128,39 @@ inputs:
       never enforced.
     required: false
     default: "false"
+  local-eval:
+    description: >-
+      Local policy engine mode. `auto` (default): the ```decionis``` rules
+      block in your policy file is evaluated in-process (microseconds); a
+      deterministic allow/block from an explicitly matched rule acts
+      immediately and the API call becomes an async notarization off the
+      critical path — the signed dossier, verify URL, and badge still arrive,
+      and a disagreeing API verdict sets `verdict-mismatch=true` with a
+      warning. `strict`: deterministic local verdicts skip the network
+      entirely (offline-capable; no dossier for those runs). `off`: v1.8
+      behavior — every verdict comes from the blocking API call.
+      Escalate/restrain matches, no-match, unknown operators, malformed or
+      YAML policies, and rules that depend on server-side state ALWAYS fall
+      back to the API. `request-grant: true` always forces the blocking path.
+    required: false
+    default: "auto"
 
 outputs:
   decision:
-    description: "Verdict — one of: allow, block, escalate, restrain."
+    description: >-
+      Verdict — one of: allow, block, escalate, restrain, review (the API's
+      REVIEW outcome). API outcomes are normalized (APPROVE→allow,
+      REJECT→block, REQUIRE_REVIEW→review).
+  decision-source:
+    description: >-
+      Where the acting verdict came from — `local` (deterministic rule from
+      the repo's policy file, evaluated in-process) or `api`.
+  verdict-mismatch:
+    description: >-
+      "true" when a deterministic local verdict acted but the notarizing API
+      call returned a different verdict (org-level policy may add rules).
+      Emitted with a `::warning::` — the signed dossier records the API
+      verdict.
   dossier-id:
     description: "Signed Decision Dossier id for this evaluation."
   verify-url:
@@ -149,7 +184,9 @@ outputs:
   badge-markdown:
     description: >-
       Ready-to-paste Markdown for a "Governed by Decionis" badge linking to the
-      signed verify URL — drop it in a README or release notes.
+      signed verify URL — drop it in a README or release notes. When a policy
+      file is present the link is pinned to its sha256 (`&policy=sha256:…`), so
+      the badge cryptographically binds the decision to the repo policy state.
   executed:
     description: >-
       `true` if a `run` command was authorized and executed, `false` if it was

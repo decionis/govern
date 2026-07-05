@@ -49,10 +49,13 @@ touches those paths.
 ## Enforced rules
 
 The prose above is documentation. The block below is what **enforces** when the
-action runs with `policy-enforce: true`. JSON only; each rule has exactly one of
-`all` / `any`, and an `action` of allow / block / restrain / escalate. Fields
-are matched against the decision `payload` — `decision_type`, `workflow_key`,
-and your own `context.*` keys. Rules are listed most-severe first.
+action runs with `policy-enforce: true` — and what the action's local policy
+engine evaluates in-process on every run. JSON only; each rule has exactly one
+of `all` / `any`, and an `action` of allow / block / restrain / escalate.
+Fields are matched against the decision `payload` — `decision_type`,
+`workflow_key`, and your own `context.*` keys. Give every rule an explicit
+`priority` (higher evaluates first) and keep `"domain": "*"` so the rule
+applies to every decision this repo gates.
 
 ```decionis
 {
@@ -60,6 +63,8 @@ and your own `context.*` keys. Rules are listed most-severe first.
   "rules": [
     {
       "name": "Escalate infrastructure destroy",
+      "priority": 100,
+      "domain": "*",
       "any": [
         { "field": "decision_type", "op": "eq", "value": "infra-destroy" },
         { "field": "workflow_key", "op": "eq", "value": "infra-destroy" },
@@ -69,6 +74,8 @@ and your own `context.*` keys. Rules are listed most-severe first.
     },
     {
       "name": "Escalate infra changes touching IAM / networking / secrets",
+      "priority": 90,
+      "domain": "*",
       "any": [
         { "field": "context.touches_iam", "op": "eq", "value": true },
         { "field": "context.touches_network", "op": "eq", "value": true },
@@ -78,11 +85,15 @@ and your own `context.*` keys. Rules are listed most-severe first.
     },
     {
       "name": "Block deploys during a change freeze",
+      "priority": 80,
+      "domain": "*",
       "all": [{ "field": "context.change_freeze", "op": "eq", "value": true }],
       "action": "block"
     },
     {
       "name": "Restrain production infrastructure apply",
+      "priority": 70,
+      "domain": "*",
       "any": [
         { "field": "decision_type", "op": "eq", "value": "infra-apply" },
         { "field": "workflow_key", "op": "eq", "value": "infra-apply" }
@@ -91,6 +102,8 @@ and your own `context.*` keys. Rules are listed most-severe first.
     },
     {
       "name": "Restrain on-chain / release deploys",
+      "priority": 60,
+      "domain": "*",
       "any": [
         { "field": "decision_type", "op": "eq", "value": "release-deploy" },
         { "field": "workflow_key", "op": "eq", "value": "release" },
@@ -100,6 +113,8 @@ and your own `context.*` keys. Rules are listed most-severe first.
     },
     {
       "name": "Restrain AI-authored infra / deploy changes",
+      "priority": 50,
+      "domain": "*",
       "all": [{ "field": "context.agent_generated", "op": "eq", "value": true }],
       "action": "restrain"
     }
