@@ -24,7 +24,8 @@ That's the Action Gate.
 
 - **One verdict per governed action** — `allow` / `block` / `restrain` / `escalate`, evaluated against _your_ policy before anything runs.
 - **Deterministic policy you own** — versioned rules, committed as `DECIONIS_POLICY.md` or connected from where policy already lives; every verdict cites the version that applied.
-- **Cryptographic proof** — each decision is a signed, public-verifiable Decision Dossier: audit-ready evidence of what was authorized and why.
+- **Microsecond verdicts** — the committed rules block is evaluated **in-process** by a local engine that mirrors the server, so deterministic verdicts act in ~1ms while the API notarizes off the critical path. Shadow mode is **speculative**: your command starts immediately, adding ~zero latency.
+- **Cryptographic proof** — each decision is a signed, public-verifiable Decision Dossier: audit-ready evidence of what was authorized and why, pinned to the exact policy revision (`sha256`).
 - **Zero-friction adoption** — start in shadow mode in 30 seconds; it never fails a build until you choose to enforce.
 
 ## Set it up in one step
@@ -33,10 +34,26 @@ Pick whichever is fastest — both drop a **shadow-mode** gate in, so nothing fa
 
 - **New repo:** [**Use this template →**](https://github.com/decionis/agent-safe-pipeline/generate) a ready-wired pipeline + `DECIONIS_POLICY.md`.
 - **Existing repo, one command:**
+
   ```bash
   curl -fsSL https://decionis.com/govern/install.sh | sh
   ```
-  Writes the workflow + `DECIONIS_POLICY.md` (no secrets touched). Add `--pr` to open the PR for you.
+
+  Writes a shadow-mode workflow + a starter `DECIONIS_POLICY.md` (no secrets touched, idempotent). The installer ships in this repo ([`install.sh`](./install.sh)) and takes flags after `sh -s --`:
+
+  | Flag             | Effect                                                                                                                                                                 |
+  | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `--pr`           | Branch (`feature/add-decionis-governance`), commit, push, and open the onboarding PR (`gh` CLI, or prints the compare URL).                                            |
+  | `--inject`       | Also insert an **observe-only** shadow step as the first step of every job in your existing workflows — insert-only, `continue-on-error: true`, skips anything unsafe. |
+  | `--dry-run`      | Show every file and diff it would write; write nothing.                                                                                                                 |
+  | `--mode`         | `shadow` (default) or `enforce` for the generated workflow.                                                                                                             |
+  | `--org-id`       | Inline a literal org id instead of `${{ secrets.DECIONIS_ORG_ID }}`.                                                                                                    |
+  | `--workflow-key` | Workflow key for the generated/injected steps.                                                                                                                          |
+
+  ```bash
+  # The full viral onboarding: gate every workflow, open the PR
+  curl -fsSL https://decionis.com/govern/install.sh | sh -s -- --pr --inject
+  ```
 
 Then add your `DECIONIS_API_KEY` / `DECIONIS_ORG_ID` secrets — [free keys here](https://decionis.com/quickstart?source=github_action).
 
@@ -64,7 +81,7 @@ On `allow` the command runs. On `block`/`escalate` it **never runs** and the ste
     workflow-key: github_deploy_approval
     action: production-deploy
     run: ./deploy.sh
-    mode: shadow # observe-only; records the verdict, never blocks
+    mode: shadow # observe-only; command starts instantly, verdict records in the background
     comment-pr: "true" # posts the verdict + verify link on the PR
 ```
 
@@ -96,9 +113,25 @@ Take secrets out of CI entirely. Register a target's credential with Decionis on
 
 One verdict before execution — **`allow`**, **`block`**, or **`escalate`**. Composable into any later step via `steps.<id>.outputs.decision`.
 
-### 2. 🟣 A zero-risk way to start
+### 2. 🟣 A zero-risk, zero-latency way to start
 
-`mode: shadow` shows exactly what would be governed, without ever failing a build. Enforce when you're ready — one line.
+`mode: shadow` shows exactly what would be governed, without ever failing a build — and it's **speculative**: your `run` command starts immediately while the verdict resolves in the background, so the gate adds ~zero wall-clock time. The step's exit code is exactly your command's; evaluation problems (API down, secrets not configured yet) surface as notices, never failures. Enforce when you're ready — one line.
+
+### ⚡ Local policy engine
+
+The ```` ```decionis ```` rules block in your `DECIONIS_POLICY.md` is evaluated **in-process** by a local engine that faithfully mirrors the platform evaluator (same operators, same coercions, same first-match ordering). A deterministic `allow`/`block` from an explicitly matched committed rule acts in **microseconds**; the API call becomes an async notarization off the critical path, so the signed dossier, verify URL, and badge still arrive. The log shows the speedup:
+
+```
+⚡ Decionis local verdict 'block' via rule "Block deploys during a change freeze" in 0.41ms — API roundtrip moved off the critical path.
+```
+
+Control it with `local-eval`:
+
+- **`auto`** (default) — local verdicts act instantly; the API notarizes in the background. If the API disagrees (org-level policy can add rules), you get a `::warning::` and `verdict-mismatch=true`.
+- **`strict`** — deterministic local verdicts skip the network entirely (offline-capable; those runs mint no dossier).
+- **`off`** — v1.8 behavior: every verdict comes from the blocking API call.
+
+The engine **never guesses**: matched `escalate`/`restrain`, no matching rule, unknown operators, malformed/YAML policies, and rules that depend on server-side state always fall back to the API. `request-grant: true` always uses the blocking path (the signed grant must exist before your command's environment is built).
 
 ### 3. 🧾 Proof you can hand an auditor
 
@@ -167,7 +200,7 @@ A single, **self-updating** comment — it stays current on every run:
 
 ## 📌 Add the badge
 
-Show your pipeline is governed — and let other devs discover the gate. Also emitted as the `badge-markdown` output (pointing at the live verify URL):
+Show your pipeline is governed — and let other devs discover the gate. Also emitted as the `badge-markdown` output, pointing at the live verify URL **pinned to your policy revision** (`…&policy=sha256:<hash>`), so the badge cryptographically binds the decision to the exact committed policy state:
 
 ```markdown
 [![Governed by Decionis](https://img.shields.io/badge/Governed%20by-Decionis-6D28D9?logo=shield&logoColor=white)](https://github.com/decionis/govern)
@@ -207,7 +240,8 @@ Copy-paste workflows in [`examples/`](./examples/):
 | `grant-audience`     | no       | —                             | Bind the grant to a target/env id (e.g. `prod-us-east`).           |
 | `payload`            | no       | _built from workflow context_ | JSON object describing the action being gated.                     |
 | `fail-on`            | no       | `block`                       | `block` / `escalate` / `block_or_escalate` / `never`.              |
-| `mode`               | no       | `enforce`                     | `enforce` or `shadow`. Shadow never fails the step.                |
+| `mode`               | no       | `enforce`                     | `enforce` or `shadow`. Shadow never fails the step and starts `run` commands immediately (speculative). |
+| `local-eval`         | no       | `auto`                        | Local policy engine: `auto` (act locally, notarize async), `strict` (offline), `off` (v1.8 blocking API). |
 | `comment-pr`         | no       | `false`                       | Post (and update in place) the verdict as a PR comment.            |
 | `show-attribution`   | no       | `true`                        | Include the "Governed by Decionis" footer on the PR comment.       |
 | `api-base-url`       | no       | `https://api.decionis.com`    | Override for staging / self-host.                                  |
@@ -218,9 +252,11 @@ Copy-paste workflows in [`examples/`](./examples/):
 
 | Output             | Description                                                                   |
 | ------------------ | ----------------------------------------------------------------------------- |
-| `decision`         | `allow` / `block` / `escalate` / `restrain`                                   |
+| `decision`         | `allow` / `block` / `escalate` / `restrain` / `review` (API outcomes are normalized, e.g. `APPROVE`→`allow`). |
+| `decision-source`  | `local` (deterministic committed-rule verdict) or `api`.                      |
+| `verdict-mismatch` | `true` when a local verdict acted but the notarizing API verdict differed.    |
 | `dossier-id`       | Signed Decision Dossier id for this evaluation.                               |
-| `verify-url`       | Public verify URL (`?sig=` so unfurls render the verdict OG card).            |
+| `verify-url`       | Public verify URL (`?sig=` for OG unfurls, `&policy=sha256:…` pinning the policy revision). |
 | `policy-version`   | Policy version (string) that produced the verdict.                            |
 | `reason-code`      | Stable reason code (string), if returned.                                     |
 | `badge-markdown`   | Ready-to-paste "Governed by Decionis" badge linking to the live verify URL.   |
@@ -240,7 +276,18 @@ permissions:
 
 ## How it works
 
-The action calls `POST /v1/protocol/evaluate-decision` with the action label + payload (or a payload built from the workflow context), and returns the signed verdict. Inputs are echoed into the dossier so you can audit exactly what produced it. `shadow` mode **never** fails the step; a non-200 from the API fails the step with the status — no silent green builds.
+1. The repo's `DECIONIS_POLICY.md` is read, sha256-hashed, and its ```` ```decionis ```` rules block is evaluated **in-process** (microseconds) by a local engine that mirrors the platform evaluator.
+2. A deterministic local `allow`/`block` acts immediately; `POST /v1/protocol/evaluate-decision` runs as an async notarization that mints the signed dossier and cross-checks the verdict. Everything the engine can't decide falls back to the blocking API call, exactly like v1.8.
+3. In `mode: shadow` with a `run` command, the command starts **first** and the entire evaluation runs in the background; after the command exits, the step waits a bounded grace window (≤10s) for the verdict, then finishes with the command's exit code.
+4. Inputs are echoed into the dossier so you can audit exactly what produced it. In `enforce` mode a non-200 from the API (with no local verdict) fails the step with the status — no silent green builds.
+
+Every run logs a timing line so the speedups are visible, e.g. `Decionis timing — command started +3ms · API verdict 'allow' in 1840ms +1846ms · command exited code 0 +61.2s`.
+
+### Changed in v1.9.0
+
+- **Shadow mode never fails the step, period.** Previously an API error failed the step even in shadow; now all gate/evaluation failures in shadow are `::notice::` lines and the exit code is your command's (or 0). Shadow also no longer requires credentials — unconfigured gates are inert.
+- **`local-eval: auto` is on by default.** Repos with a ```` ```decionis ```` rules block get local verdicts + async notarization; repos without one see no change in decision flow. Set `local-eval: off` for strict v1.8 behavior.
+- **API outcomes are normalized** (`APPROVE`→`allow`, `REJECT`→`block`, `REQUIRE_REVIEW`/`REVIEW`→`review`) so `run` gating and `fail-on` work against the current Decionis API vocabulary.
 
 ---
 

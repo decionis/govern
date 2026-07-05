@@ -1,6 +1,6 @@
 {
   "name": "@decionis/github-action",
-  "version": "1.8.8",
+  "version": "1.9.0",
   "description": "Govern a GitHub Actions step on a Decionis Decision Dossier — gate deploys, releases, infra changes, and agent-triggered actions on a signed verdict.",
   "private": true,
   "type": "module",
@@ -19,6 +19,7 @@
   },
   "files": [
     "action.yml",
+    "install.sh",
     "src",
     "assets",
     "README.md",

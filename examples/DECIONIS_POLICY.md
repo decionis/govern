@@ -63,8 +63,11 @@ AI-generated pull requests in this repository.
 The prose above is documentation. The block below is what actually **enforces**
 when the action runs with `policy-enforce: true` — it compiles 1:1 into an
 active policy bundle (idempotent by content hash; change the block, it
-republishes). JSON only; each rule has exactly one of `all` / `any`, and an
-`action` of allow / block / restrain / escalate.
+republishes) — and what the action's **local policy engine** evaluates
+in-process on every run. JSON only; each rule has exactly one of `all` / `any`,
+and an `action` of allow / block / restrain / escalate. Give every rule an
+explicit `priority` (higher evaluates first) and keep `"domain": "*"` so the
+rule applies to every decision this repo gates.
 
 ```decionis
 {
@@ -72,6 +75,8 @@ republishes). JSON only; each rule has exactly one of `all` / `any`, and an
   "rules": [
     {
       "name": "Block production deploys during a change freeze",
+      "priority": 100,
+      "domain": "*",
       "all": [
         { "field": "decision_type", "op": "eq", "value": "production-deploy" },
         { "field": "context.change_freeze", "op": "eq", "value": true }
@@ -80,6 +85,8 @@ republishes). JSON only; each rule has exactly one of `all` / `any`, and an
     },
     {
       "name": "Escalate IAM / security-group changes",
+      "priority": 90,
+      "domain": "*",
       "any": [
         { "field": "context.touches_iam", "op": "eq", "value": true },
         { "field": "context.touches_network", "op": "eq", "value": true }
@@ -88,6 +95,8 @@ republishes). JSON only; each rule has exactly one of `all` / `any`, and an
     },
     {
       "name": "Restrain AI-authored deploy/infra/migration changes",
+      "priority": 80,
+      "domain": "*",
       "all": [
         { "field": "context.agent_generated", "op": "eq", "value": true }
       ],
