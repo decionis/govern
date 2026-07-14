@@ -43,6 +43,18 @@ function getInput(name, { required = false } = {}) {
   return value;
 }
 
+/**
+ * Strip stray wrapping quotes (straight or smart) and surrounding whitespace
+ * that sneak in when a secret is pasted as `"key"` — a credential never
+ * legitimately contains them, and a smart quote (U+201C…) would otherwise crash
+ * the Authorization header ("Cannot convert argument to a ByteString").
+ */
+function sanitizeCredential(value) {
+  return value
+    .replace(/^[\s"'“”‘’]+/, "")
+    .replace(/[\s"'“”‘’]+$/, "");
+}
+
 function getBooleanInput(name, fallback = false) {
   const raw = getInput(name).trim().toLowerCase();
   if (raw === "") return fallback;
@@ -556,9 +568,9 @@ async function main() {
   let orgId = "";
   let workflowKey = "";
   try {
-    apiKey = getInput("api-key", { required: true });
-    orgId = getInput("org-id", { required: true });
-    workflowKey = getInput("workflow-key", { required: true });
+    apiKey = sanitizeCredential(getInput("api-key", { required: true }));
+    orgId = sanitizeCredential(getInput("org-id", { required: true }));
+    workflowKey = sanitizeCredential(getInput("workflow-key", { required: true }));
   } catch (err) {
     if (runMode !== "shadow") throw err;
     logNotice(
