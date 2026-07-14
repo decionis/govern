@@ -10,7 +10,7 @@ inputs:
   api-key:
     description: >-
       Decionis API key with `protocol:evaluate` scope. Pass as a workflow secret
-      (`${{ secrets.DECIONIS_API_KEY }}`). Never hard-code.
+      (`secrets.DECIONIS_API_KEY`). Never hard-code.
     required: true
   org-id:
     description: "Decionis org id (UUID) the decision belongs to."
