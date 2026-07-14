@@ -31,8 +31,11 @@ export const BLOCK_RECORD_CAP_MS = 5_000;
 
 /** Read an Action input (GitHub maps inputs to env vars). */
 function getInput(name, { required = false } = {}) {
-  const envKey = `INPUT_${name.toUpperCase().replace(/-/g, "_")}`;
-  const value = process.env[envKey];
+  // GitHub maps input `api-key` → env `INPUT_API-KEY`: it upper-cases and
+  // replaces spaces with `_`, but keeps hyphens (matching @actions/core). Read
+  // that form first, then fall back to the legacy hyphen→`_` form for safety.
+  const upper = name.replace(/ /g, "_").toUpperCase();
+  const value = process.env[`INPUT_${upper}`] || process.env[`INPUT_${upper.replace(/-/g, "_")}`];
   if (value === undefined || value === "") {
     if (required) throw new Error(`Decionis: missing required input '${name}'`);
     return "";
