@@ -1,0 +1,32 @@
+# Decionis Action Gate (decionis/govern)
+
+> GitHub Action that governs high-risk workflow steps — deploys, migrations, releases, infra changes, AI-generated PRs — before they run. One step evaluates the action against your committed policy and returns a deterministic verdict (allow / block / restrain / escalate), sealed as a signed, publicly verifiable Decision Dossier. Shadow mode records verdicts without ever failing a build; enforce mode gates for real.
+
+Quickstart:
+
+- Add a workflow step: `uses: decionis/govern@v1`
+- One-command install into an existing repo: `curl -fsSL https://decionis.com/govern/install.sh | sh`
+- Policy is committed in-repo as `DECIONIS_POLICY.md` (YAML also accepted); the structured rules block can be evaluated in-process in ~1 ms (`local-eval: auto`) while the API notarizes the signed dossier off the critical path.
+- Requires a `DECIONIS_API_KEY` workflow secret (`protocol:evaluate` scope) and your Decionis org id.
+
+Key inputs: `api-key`, `org-id`, `workflow-key`, `mode` (enforce | shadow), `fail-on`, `run` (command executed only if authorized), `request-grant` (short-lived signed Execution Grant), `payload`, `policy-file`, `policy-enforce`, `local-eval`, `comment-pr`.
+
+Key outputs: `decision`, `decision-source`, `dossier-id`, `verify-url`, `policy-sha256`, `badge-markdown`, `executed`, `execution-grant`.
+
+## Docs
+
+- [Quickstart](https://decionis.com/docs/quickstart?utm_source=github&utm_medium=llms_txt&utm_campaign=dev_discovery): First verdict in minutes
+- [API reference](https://decionis.com/docs/api?utm_source=github&utm_medium=llms_txt&utm_campaign=dev_discovery): Evaluate decisions and retrieve dossiers
+- [Dossier verification](https://decionis.com/verify/decision-dossiers?utm_source=github&utm_medium=llms_txt&utm_campaign=dev_discovery): Verify signed Decision Dossiers, including offline
+- [Marketplace listing](https://github.com/marketplace/actions/decionis-action-gate): Decionis Action Gate on the GitHub Marketplace
+
+## Try it
+
+- [Sandbox](https://decionis.com/sandbox?utm_source=github&utm_medium=llms_txt&utm_campaign=dev_discovery): Run a live policy check without an account
+- [Board](https://board.decionis.com/?utm_source=github&utm_medium=llms_txt&utm_campaign=dev_discovery): Console for policies, verdicts, and dossiers
+
+## Related
+
+- [Decionis](https://decionis.com/?utm_source=github&utm_medium=llms_txt&utm_campaign=dev_discovery): The deterministic decision layer between intent and execution
+- [Organization profile](https://github.com/decionis): All public Decionis repositories
+- [Security policy](https://github.com/decionis/.github/blob/master/SECURITY.md): Vulnerability disclosure process and SLAs
