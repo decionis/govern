@@ -32,7 +32,7 @@ That's the Action Gate.
 
 Pick whichever is fastest — both drop a **shadow-mode** gate in, so nothing fails your build on day one:
 
-- **New repo:** [**Use this template →**](https://github.com/decionis/agent-safe-pipeline/generate) a ready-wired pipeline + `DECIONIS_POLICY.md`.
+- **New repo:** [**Start from the examples →**](https://github.com/decionis/govern/tree/main/examples) — ready-wired gate workflows (deploy, Terraform, AI-agent PRs, Dependabot auto-merge) + a starter `DECIONIS_POLICY.md`.
 - **Existing repo, one command:**
 
   ```bash
