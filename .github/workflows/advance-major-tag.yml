@@ -1,0 +1,39 @@
+name: Advance major tag
+
+# `uses: decionis/govern@v1` is what every README, the Marketplace listing, and
+# the installer pin. If that float lags behind the newest release, every
+# consumer silently runs old code — which is exactly how v1 stayed on v1.9.0
+# after v1.9.1-v1.9.3 shipped.
+#
+# The monorepo release workflow already moves the float when it runs. This is
+# the backstop for version tags pushed to this repo by any other route.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: advance-major-tag
+  cancel-in-progress: false
+
+jobs:
+  advance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move the major float to this release
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          MAJOR="v$(printf '%s' "${TAG#v}" | cut -d. -f1)"
+          echo "Pointing ${MAJOR} at ${TAG} (${GITHUB_SHA})"
+          git tag -fa "${MAJOR}" -m "Decionis Govern Action ${MAJOR} (latest ${MAJOR}.x)" "${GITHUB_SHA}"
+          git push -f origin "refs/tags/${MAJOR}"
+          echo "::notice::${MAJOR} now points at ${TAG}."
