@@ -39,20 +39,18 @@ Pick whichever is fastest — both drop a **shadow-mode** gate in, so nothing fa
   curl -fsSL https://decionis.com/govern/install.sh | sh
   ```
 
-  Writes a shadow-mode workflow + a starter `DECIONIS_POLICY.md` (no secrets touched, idempotent). The installer ships in this repo ([`install.sh`](./install.sh)) and takes flags after `sh -s --`:
+  Writes a shadow-mode workflow + a starter `DECIONIS_POLICY.md` (no secrets touched, idempotent). Flags go after `sh -s --`, and the hosted one-liner takes two:
 
-  | Flag             | Effect                                                                                                                                                                 |
-  | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | `--pr`           | Branch (`feature/add-decionis-governance`), commit, push, and open the onboarding PR (`gh` CLI, or prints the compare URL).                                            |
-  | `--inject`       | Also insert an **observe-only** shadow step as the first step of every job in your existing workflows — insert-only, `continue-on-error: true`, skips anything unsafe. |
-  | `--dry-run`      | Show every file and diff it would write; write nothing.                                                                                                                 |
-  | `--mode`         | `shadow` (default) or `enforce` for the generated workflow.                                                                                                             |
-  | `--org-id`       | Inline a literal org id instead of `${{ secrets.DECIONIS_ORG_ID }}`.                                                                                                    |
-  | `--workflow-key` | Workflow key for the generated/injected steps.                                                                                                                          |
+  | Flag      | Effect                                                                                                     |
+  | --------- | ---------------------------------------------------------------------------------------------------------- |
+  | `--pr`    | Branch (`feature/add-decionis-governance`), commit, push, and open the onboarding PR (`gh` CLI, or prints the compare URL). |
+  | `--force` | Overwrite files that already exist.                                                                        |
+
+  The fuller installer ships in this repo ([`install.sh`](./install.sh)) and adds `--inject` (insert an **observe-only** shadow step at the top of every job in your existing workflows — insert-only, `continue-on-error: true`, skips anything unsafe), `--dry-run`, `--mode`, `--org-id`, and `--workflow-key`. Run that copy directly:
 
   ```bash
   # The full viral onboarding: gate every workflow, open the PR
-  curl -fsSL https://decionis.com/govern/install.sh | sh -s -- --pr --inject
+  curl -fsSL https://raw.githubusercontent.com/decionis/govern/v1/install.sh | sh -s -- --pr --inject
   ```
 
 Then add your `DECIONIS_API_KEY` / `DECIONIS_ORG_ID` secrets — [free keys here](https://decionis.com/quickstart?source=github_action).
@@ -162,7 +160,7 @@ Keep policy where developers already work — in the repo, in Markdown, reviewed
     run: ./deploy.sh
 ```
 
-Outputs `policy-sha256` + `policy-path`. A missing/unreadable file never fails the gate. See the annotated [example policy](./examples/DECIONIS_POLICY.md) to copy — or the [DevOps/CI example](./examples/DECIONIS_POLICY.devops.md) (escalate infra destroys, restrain applies + release deploys, block during change freeze). For an **org-wide** policy, point a Git source connector at your `.github` repo's `DECIONIS_POLICY.md`.
+Outputs `policy-sha256` + `policy-path`. A missing/unreadable file never fails the gate. **Two different things get called "enforcement":** the committed rules block is evaluated by the local engine on every run (`local-eval: auto`, on by default) and that verdict gates this step, while publishing those rules as the org's **active policy bundle** for this `workflow-key` is a separate opt-in via `policy-enforce: true`. At the default, your file is recorded and version-pinned on the dossier but does not change server-side enforcement. See the annotated [example policy](./examples/DECIONIS_POLICY.md) to copy — or the [DevOps/CI example](./examples/DECIONIS_POLICY.devops.md) (escalate infra destroys, restrain applies + release deploys, block during change freeze). For an **org-wide** policy, point a Git source connector at your `.github` repo's `DECIONIS_POLICY.md`.
 
 ---
 
@@ -239,7 +237,7 @@ Copy-paste workflows in [`examples/`](./examples/):
 | `request-grant`      | no       | `false`                       | Issue a signed Execution Grant on an authorizing verdict.          |
 | `grant-audience`     | no       | —                             | Bind the grant to a target/env id (e.g. `prod-us-east`).           |
 | `payload`            | no       | _built from workflow context_ | JSON object describing the action being gated.                     |
-| `fail-on`            | no       | `block`                       | `block` / `escalate` / `block_or_escalate` / `never`.              |
+| `fail-on`            | no       | `block`                       | Which verdicts fail the step — `block` / `escalate` / `block_or_escalate` / `never`. **Advisory path only:** when `run` is set, any non-authorizing verdict blocks the command and fails the step regardless of this value. |
 | `mode`               | no       | `enforce`                     | `enforce` or `shadow`. Shadow never fails the step and starts `run` commands immediately (speculative). |
 | `local-eval`         | no       | `auto`                        | Local policy engine: `auto` (act locally, notarize async), `strict` (offline), `off` (v1.8 blocking API). |
 | `comment-pr`         | no       | `false`                       | Post (and update in place) the verdict as a PR comment.            |
@@ -247,6 +245,8 @@ Copy-paste workflows in [`examples/`](./examples/):
 | `api-base-url`       | no       | `https://api.decionis.com`    | Override for staging / self-host.                                  |
 | `site-base-url`      | no       | `https://decionis.com`        | Override for staging / self-host.                                  |
 | `request-timeout-ms` | no       | `20000`                       | Timeout for the evaluate-decision call.                            |
+| `policy-file`        | no       | `DECIONIS_POLICY.md`          | Repo-relative policy file injected into the decision and content-hashed. Set to `""` to disable. |
+| `policy-enforce`     | no       | `false`                       | Compile the file's ` ```decionis ` rules block into the **active enforced** bundle for this org + workflow-key. Left `false`, the file is recorded and versioned but does not auto-enforce. |
 
 ## Outputs
 
@@ -258,6 +258,9 @@ Copy-paste workflows in [`examples/`](./examples/):
 | `dossier-id`       | Signed Decision Dossier id for this evaluation.                               |
 | `verify-url`       | Public verify URL (`?sig=` for OG unfurls, `&policy=sha256:…` pinning the policy revision). |
 | `policy-version`   | Policy version (string) that produced the verdict.                            |
+| `policy-sha256`    | sha256 of the injected policy file — the content-addressed version handle.    |
+| `policy-path`      | Repo-relative path of the injected policy file, if one was found.             |
+| `policy-enforced`  | `true` when `policy-enforce` was set and a policy file was found.              |
 | `reason-code`      | Stable reason code (string), if returned.                                     |
 | `badge-markdown`   | Ready-to-paste "Governed by Decionis" badge linking to the live verify URL.   |
 | `executed`         | `true` if a `run` command was authorized and executed, `false` if blocked.    |
