@@ -23,7 +23,6 @@ Key outputs: `decision`, `decision-source`, `dossier-id`, `verify-url`, `policy-
 ## Try it
 
 - [Sandbox](https://decionis.com/sandbox?utm_source=github&utm_medium=llms_txt&utm_campaign=dev_discovery): Run a live policy check without an account
-- [Board](https://board.decionis.com/?utm_source=github&utm_medium=llms_txt&utm_campaign=dev_discovery): Console for policies, verdicts, and dossiers
 
 ## Related
 
