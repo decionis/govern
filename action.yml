@@ -2,7 +2,8 @@
 # github.com/marketplace/actions/decionis-action-gate.
 name: "Decionis Action Gate"
 author: "Decionis"
-description: "Govern: one Decionis verdict before a workflow step runs — a deploy, a migration, an infrastructure change, an agent's action — with a signed Decision Dossier of it."
+# The Marketplace caps this at 125 characters.
+description: "Gate a deploy, migration, infra change or agent action on one Decionis verdict, with a signed Decision Dossier of it."
 
 branding:
   icon: "shield"
