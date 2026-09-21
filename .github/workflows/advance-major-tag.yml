@@ -31,6 +31,10 @@ jobs:
       - name: Move the major float to this release
         run: |
           set -euo pipefail
+          # An annotated tag needs a tagger; the runner has no identity of its
+          # own, and the first run (v2.0.0) died on "empty ident name".
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           TAG="${GITHUB_REF_NAME}"
           MAJOR="v$(printf '%s' "${TAG#v}" | cut -d. -f1)"
           echo "Pointing ${MAJOR} at ${TAG} (${GITHUB_SHA})"
