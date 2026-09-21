@@ -1,31 +1,20 @@
-# Decionis Action Gate (decionis/govern)
+# Decionis Govern (decionis/govern)
 
-> GitHub Action that governs high-risk workflow steps — deploys, migrations, releases, infra changes, AI-generated PRs — before they run. One step evaluates the action against your committed policy and returns a deterministic verdict (allow / block / restrain / escalate), sealed as a signed, publicly verifiable Decision Dossier. Shadow mode records verdicts without ever failing a build; enforce mode gates for real.
+> GitHub Action, the Marketplace address of Govern: one Decionis verdict before a workflow step runs — a deploy, a migration, an infrastructure change, a release, an agent's action — with a signed Decision Dossier of it. The step becomes an execution intent, Decionis decides on exactly that intent, the command runs only on an ALLOW whose single-use grant the step claimed first, and the outcome is finalized into the dossier. Nothing is decided locally.
 
 Quickstart:
 
-- Add a workflow step: `uses: decionis/govern@v1`
-- One-command install into an existing repo: `curl -fsSL https://decionis.com/govern/install.sh | sh`
-- Policy is committed in-repo as `DECIONIS_POLICY.md` (YAML also accepted); the structured rules block can be evaluated in-process in ~1 ms (`local-eval: auto`) while the API notarizes the signed dossier off the critical path.
-- Requires a `DECIONIS_API_KEY` workflow secret (`protocol:evaluate` scope) and your Decionis org id.
+- Add a workflow step: `uses: decionis/govern@v2` with `api-key` (a secret), `tenant-id` (a variable), `action`, and `run` (the command the verdict gates).
+- `mode: shadow` starts the command at once and records the verdict beside it; it never fails a build.
+- The gate is one Go binary for GitHub Actions, GitLab CI, Jenkins and any runner; its source, tests and releases are in decionis/agent-safe-pipeline under govern/.
 
-Key inputs: `api-key`, `org-id`, `workflow-key`, `mode` (enforce | shadow), `fail-on`, `run` (command executed only if authorized), `request-grant` (short-lived signed Execution Grant), `payload`, `policy-file`, `policy-enforce`, `local-eval`, `comment-pr`.
+Key inputs: `api-key`, `tenant-id`, `mode` (enforce | shadow), `action`, `resource`, `payload`, `environment`, `run`, `fail-on`, `escalation` (managed), `approver`, `approver-role`, `policy-file`, `comment`.
 
-Key outputs: `decision`, `decision-source`, `dossier-id`, `verify-url`, `policy-sha256`, `badge-markdown`, `executed`, `execution-grant`.
+Key outputs: `decision`, `decision-id`, `dossier-id`, `verify-url`, `intent-hash`, `reason-codes`, `policy-version`, `executed`, `claimed`, `outcome`, `finalization`, `badge-markdown`.
 
 ## Docs
 
-- [Quickstart](https://decionis.com/docs/quickstart?utm_source=github&utm_medium=llms_txt&utm_campaign=dev_discovery): First verdict in minutes
-- [API reference](https://decionis.com/docs/api?utm_source=github&utm_medium=llms_txt&utm_campaign=dev_discovery): Evaluate decisions and retrieve dossiers
-- [Dossier verification](https://decionis.com/verify/decision-dossiers?utm_source=github&utm_medium=llms_txt&utm_campaign=dev_discovery): Verify signed Decision Dossiers, including offline
-- [Marketplace listing](https://github.com/marketplace/actions/decionis-action-gate): Decionis Action Gate on the GitHub Marketplace
-
-## Try it
-
-- [Sandbox](https://decionis.com/sandbox?utm_source=github&utm_medium=llms_txt&utm_campaign=dev_discovery): Run a live policy check without an account
-
-## Related
-
-- [Decionis](https://decionis.com/?utm_source=github&utm_medium=llms_txt&utm_campaign=dev_discovery): The deterministic decision layer between intent and execution
-- [Organization profile](https://github.com/decionis): All public Decionis repositories
-- [Security policy](https://github.com/decionis/.github/blob/master/SECURITY.md): Vulnerability disclosure process and SLAs
+- [The gate's README](https://github.com/decionis/agent-safe-pipeline/blob/master/govern/README.md): every setting, output, exit code and runner surface
+- [Govern, the workflow gate](https://github.com/decionis/agent-safe-pipeline/blob/master/docs/govern.md): what one governed step is, holding a step for a person, what the record shows
+- [Quickstart](https://decionis.com/quickstart?source=github_action): a workspace and a key in minutes
+- [Decision Dossier verification](https://decionis.com/verify/decision-dossiers): verify a signed dossier, including offline
